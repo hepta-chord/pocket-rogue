@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+    <meta name="theme-color" content="#101014" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Pocket Rogue" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="./icon-192.png" />
+    <link rel="icon" href="./icon-192.png" />
+    <title>Pocket Rogue</title>
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="game"></canvas>
+      <div id="controls">
+        <div id="pad">
+          <button type="button" data-dir="-1,-1" aria-label="左上">↖</button>
+          <button type="button" data-dir="0,-1" aria-label="上">↑</button>
+          <button type="button" data-dir="1,-1" aria-label="右上">↗</button>
+          <button type="button" data-dir="-1,0" aria-label="左">←</button>
+          <button type="button" data-dir="0,0" aria-label="待機" class="wait">待つ</button>
+          <button type="button" data-dir="1,0" aria-label="右">→</button>
+          <button type="button" data-dir="-1,1" aria-label="左下">↙</button>
+          <button type="button" data-dir="0,1" aria-label="下">↓</button>
+          <button type="button" data-dir="1,1" aria-label="右下">↘</button>
+        </div>
+      </div>
+      <button type="button" id="menu-btn" aria-label="メニュー">≡</button>
+    </div>
+
+    <dialog id="menu">
+      <h2>Pocket Rogue</h2>
+      <p class="hint">同じ seed なら同じダンジョンになります。友人と seed を交換して遊べます。</p>
+      <label for="seed-input">seed</label>
+      <div class="row">
+        <input id="seed-input" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="16" />
+        <button type="button" id="seed-random">ランダム</button>
+        <button type="button" id="seed-copy">コピー</button>
+      </div>
+      <div class="row actions">
+        <button type="button" id="new-game" class="primary">この seed で新しいゲーム</button>
+        <button type="button" id="menu-close">閉じる</button>
+      </div>
+      <p class="hint small">PC はカーソルキー・テンキー・hjklyubn で移動、. または Space で待機。</p>
+    </dialog>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

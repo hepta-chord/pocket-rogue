@@ -1,0 +1,55 @@
+// オフライン対応の Service Worker。
+// Vite はビルドごとに assets/ のファイル名 (ハッシュ) を変えるので、一覧は持たない。
+// - index.html などの入口: ネットワーク優先。失敗したらキャッシュ
+// - assets/ (ハッシュ付きで内容が変わらない): キャッシュ優先。無ければ取得して保存
+const CACHE = 'pocket-rogue-v1';
+const PRECACHE = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
+
+self.addEventListener('install', (event) => {
+  event.waitUntil(
+    caches
+      .open(CACHE)
+      .then((cache) => cache.addAll(PRECACHE))
+      .then(() => self.skipWaiting()),
+  );
+});
+
+self.addEventListener('activate', (event) => {
+  event.waitUntil(
+    caches
+      .keys()
+      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
+      .then(() => self.clients.claim()),
+  );
+});
+
+self.addEventListener('fetch', (event) => {
+  const req = event.request;
+  if (req.method !== 'GET') return;
+  const url = new URL(req.url);
+  if (url.origin !== self.location.origin) return;
+
+  const isImmutableAsset = url.pathname.includes('/assets/');
+  event.respondWith(isImmutableAsset ? cacheFirst(req) : networkFirst(req));
+});
+
+async function cacheFirst(req) {
+  const cache = await caches.open(CACHE);
+  const hit = await cache.match(req);
+  if (hit) return hit;
+  const res = await fetch(req);
+  if (res.ok) cache.put(req, res.clone());
+  return res;
+}
+
+async function networkFirst(req) {
+  const cache = await caches.open(CACHE);
+  try {
+    const res = await fetch(req);
+    if (res.ok) cache.put(req, res.clone());
+    return res;
+  } catch {
+    const hit = (await cache.match(req)) || (req.mode === 'navigate' ? await cache.match('./index.html') : undefined);
+    return hit || Response.error();
+  }
+}
