@@ -1,8 +1,8 @@
 import type { GameMap } from './map';
-import { Tile, idx } from './map';
+import { Tile, idx, isWalkable } from './map';
 import type { Rng } from './rng';
 
-export type MonsterKind = 'rat' | 'bat' | 'goblin' | 'orc' | 'troll' | 'dragon';
+export type MonsterKind = 'rat' | 'bat' | 'goblin' | 'slime' | 'orc' | 'ghost' | 'troll' | 'wolf' | 'dragon';
 export type ActorKind = 'player' | MonsterKind;
 
 export interface Actor {
@@ -15,24 +15,75 @@ export interface Actor {
   atk: number;
 }
 
-interface MonsterDef {
+/**
+ * パッシブ: 常に働く性質。
+ * - fast: 1 ターンに 2 回行動する (攻撃は 1 回まで)
+ * - slow: 2 ターンに 1 回しか行動しない
+ * - regen: 毎ターン HP 1 回復
+ * - erratic: 追うとき半分の確率で狙いがそれる
+ * - phasing: 壁の中を移動できる
+ * - split: 近接攻撃を受けて生き残ると HP を半分にして 2 匹に割れる
+ */
+export type Passive = 'fast' | 'slow' | 'regen' | 'erratic' | 'phasing' | 'split';
+
+/**
+ * アクション: 条件が揃ったとき確率で使う技。使わなかったら通常行動。
+ * - doubleAttack: 隣接時、2 回攻撃
+ * - smash: 隣接時、防具を無視した一撃
+ * - leap: 距離 2 のとき、一気に隣接して攻撃
+ * - breath: 距離 2〜4 で見えているとき、炎を吐く (攻撃力の半分 + 階数。防具で軽減)
+ */
+export type ActionKind = 'doubleAttack' | 'smash' | 'leap' | 'breath';
+
+export interface MonsterAction {
+  kind: ActionKind;
+  /** 条件が揃ったときに使う確率 (0〜1) */
+  chance: number;
+}
+
+export interface MonsterDef {
   name: string;
   hp: number;
   atk: number;
-  /** この階層から出現する */
+  /** この階から出る */
   minDepth: number;
+  /** この階を過ぎると出ない */
+  maxDepth: number;
   /** 出現の重み */
   weight: number;
+  /** 1 階に配置する上限 (分裂などで増えるぶんは含まない) */
+  maxPerFloor: number;
+  /** 群れの人数 [最小, 最大] */
+  pack: [number, number];
+  passives: Passive[];
+  action?: MonsterAction;
 }
 
+const ANY = 99;
+
+// 敵の定義表。新しい敵はここに 1 行足せば出る。
 export const MONSTERS: Record<MonsterKind, MonsterDef> = {
-  rat: { name: 'ネズミ', hp: 3, atk: 1, minDepth: 1, weight: 5 },
-  bat: { name: 'コウモリ', hp: 4, atk: 2, minDepth: 1, weight: 3 },
-  goblin: { name: 'ゴブリン', hp: 6, atk: 2, minDepth: 2, weight: 4 },
-  orc: { name: 'オーク', hp: 10, atk: 3, minDepth: 4, weight: 3 },
-  troll: { name: 'トロル', hp: 16, atk: 5, minDepth: 6, weight: 2 },
-  dragon: { name: 'ドラゴン', hp: 30, atk: 8, minDepth: 9, weight: 1 },
+  rat: { name: 'ネズミ', hp: 3, atk: 1, minDepth: 1, maxDepth: 4, weight: 5, maxPerFloor: ANY, pack: [2, 3], passives: [] },
+  bat: { name: 'コウモリ', hp: 4, atk: 2, minDepth: 1, maxDepth: 6, weight: 3, maxPerFloor: ANY, pack: [1, 1], passives: ['fast', 'erratic'] },
+  goblin: { name: 'ゴブリン', hp: 6, atk: 2, minDepth: 2, maxDepth: 8, weight: 4, maxPerFloor: ANY, pack: [1, 1], passives: [], action: { kind: 'doubleAttack', chance: 0.3 } },
+  slime: { name: 'スライム', hp: 8, atk: 2, minDepth: 3, maxDepth: 7, weight: 3, maxPerFloor: 2, pack: [1, 1], passives: ['split'] },
+  orc: { name: 'オーク', hp: 12, atk: 4, minDepth: 4, maxDepth: ANY, weight: 3, maxPerFloor: ANY, pack: [1, 1], passives: [] },
+  ghost: { name: '幽霊', hp: 8, atk: 3, minDepth: 5, maxDepth: ANY, weight: 2, maxPerFloor: ANY, pack: [1, 1], passives: ['phasing'] },
+  troll: { name: 'トロル', hp: 18, atk: 5, minDepth: 6, maxDepth: ANY, weight: 2, maxPerFloor: ANY, pack: [1, 1], passives: ['regen', 'slow'], action: { kind: 'smash', chance: 0.25 } },
+  wolf: { name: '狼', hp: 10, atk: 4, minDepth: 7, maxDepth: ANY, weight: 3, maxPerFloor: ANY, pack: [1, 1], passives: ['fast'], action: { kind: 'leap', chance: 0.4 } },
+  dragon: { name: 'ドラゴン', hp: 30, atk: 8, minDepth: 9, maxDepth: ANY, weight: 1, maxPerFloor: 1, pack: [1, 1], passives: [], action: { kind: 'breath', chance: 0.3 } },
 };
+
+/** 分裂で増えるスライムの上限 (1 階あたり) */
+export const SLIME_CAP = 4;
+
+export function monsterDef(kind: ActorKind): MonsterDef | null {
+  return kind === 'player' ? null : MONSTERS[kind];
+}
+
+export function hasPassive(kind: ActorKind, p: Passive): boolean {
+  return monsterDef(kind)?.passives.includes(p) ?? false;
+}
 
 export function actorName(kind: ActorKind): string {
   return kind === 'player' ? 'あなた' : MONSTERS[kind].name;
@@ -42,6 +93,18 @@ export function createPlayer(x: number, y: number): Actor {
   return { id: 0, kind: 'player', x, y, hp: 20, maxHp: 20, atk: 4 };
 }
 
+/** 階の深さに応じて強くした個体を作る */
+export function createMonster(kind: MonsterKind, depth: number, x: number, y: number, id: number): Actor {
+  const def = MONSTERS[kind];
+  const bonus = Math.max(0, depth - def.minDepth);
+  const hp = def.hp + bonus;
+  return { id, kind, x, y, hp, maxHp: hp, atk: def.atk + Math.floor(bonus / 3) };
+}
+
+/**
+ * 階ごとの配置。人数の予算 (3 + 階 + 0〜2) を、出現条件を満たす敵から重みで選んで埋める。
+ * 群れは 1 回の抽選でまとめて置き、上限のある敵は数える。
+ */
 export function spawnMonsters(
   rng: Rng,
   map: GameMap,
@@ -49,26 +112,29 @@ export function spawnMonsters(
   avoid: { x: number; y: number },
   nextId: () => number,
 ): Actor[] {
-  const pool = (Object.keys(MONSTERS) as MonsterKind[]).filter((k) => MONSTERS[k].minDepth <= depth);
-  const count = 3 + depth + rng.int(0, 2);
+  const budget = 3 + depth + rng.int(0, 2);
   const monsters: Actor[] = [];
+  const counts: Partial<Record<MonsterKind, number>> = {};
 
-  for (let i = 0; i < count; i++) {
-    const kind = weightedPick(rng, pool);
-    const pos = findSpot(rng, map, avoid, monsters);
-    if (!pos) break;
-    const def = MONSTERS[kind];
-    const bonus = depth - def.minDepth;
-    const hp = def.hp + bonus;
-    monsters.push({
-      id: nextId(),
-      kind,
-      x: pos.x,
-      y: pos.y,
-      hp,
-      maxHp: hp,
-      atk: def.atk + Math.floor(bonus / 3),
+  for (let attempt = 0; attempt < 30 && monsters.length < budget; attempt++) {
+    const pool = (Object.keys(MONSTERS) as MonsterKind[]).filter((k) => {
+      const d = MONSTERS[k];
+      return d.minDepth <= depth && depth <= d.maxDepth && (counts[k] ?? 0) < d.maxPerFloor;
     });
+    if (pool.length === 0) break;
+    const kind = weightedPick(rng, pool);
+    const def = MONSTERS[kind];
+    const first = findSpot(rng, map, avoid, monsters);
+    if (!first) continue;
+    monsters.push(createMonster(kind, depth, first.x, first.y, nextId()));
+    counts[kind] = (counts[kind] ?? 0) + 1;
+
+    const packSize = rng.int(def.pack[0], def.pack[1]);
+    for (let i = 1; i < packSize; i++) {
+      const near = findNear(rng, map, first, monsters, avoid);
+      if (!near) break;
+      monsters.push(createMonster(kind, depth, near.x, near.y, nextId()));
+    }
   }
   return monsters;
 }
@@ -95,6 +161,25 @@ function findSpot(
     const y = rng.int(room.y, room.y + room.h - 1);
     if (map.tiles[idx(map, x, y)] !== Tile.Floor) continue;
     if (Math.max(Math.abs(x - avoid.x), Math.abs(y - avoid.y)) < 6) continue;
+    if (occupied.some((m) => m.x === x && m.y === y)) continue;
+    return { x, y };
+  }
+  return null;
+}
+
+/** 群れの仲間を置く。中心から 2 マス以内の空いた床 */
+function findNear(
+  rng: Rng,
+  map: GameMap,
+  center: { x: number; y: number },
+  occupied: Actor[],
+  avoid: { x: number; y: number },
+): { x: number; y: number } | null {
+  for (let tries = 0; tries < 20; tries++) {
+    const x = center.x + rng.int(-2, 2);
+    const y = center.y + rng.int(-2, 2);
+    if (!isWalkable(map, x, y) || map.tiles[idx(map, x, y)] !== Tile.Floor) continue;
+    if (Math.max(Math.abs(x - avoid.x), Math.abs(y - avoid.y)) < 5) continue;
     if (occupied.some((m) => m.x === x && m.y === y)) continue;
     return { x, y };
   }

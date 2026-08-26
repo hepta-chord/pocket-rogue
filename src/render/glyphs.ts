@@ -22,8 +22,11 @@ export const ACTOR_GLYPHS: Record<ActorKind, Glyph> = {
   rat: { ch: 'r', fg: '#c9a27a' },
   bat: { ch: 'b', fg: '#b98cff' },
   goblin: { ch: 'g', fg: '#7fd17f' },
+  slime: { ch: 's', fg: '#8fe3a0' },
   orc: { ch: 'o', fg: '#f08c4a' },
+  ghost: { ch: 'G', fg: '#c8c8ff' },
   troll: { ch: 'T', fg: '#5aa9e6' },
+  wolf: { ch: 'w', fg: '#b8b8b8' },
   dragon: { ch: 'D', fg: '#ff5c5c' },
 };
 

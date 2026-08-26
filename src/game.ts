@@ -1,4 +1,16 @@
-import { actorName, createPlayer, spawnMonsters, type Actor } from './entity';
+import {
+  MONSTERS,
+  SLIME_CAP,
+  actorName,
+  createMonster,
+  createPlayer,
+  hasPassive,
+  spawnMonsters,
+  type ActionKind,
+  type Actor,
+  type MonsterDef,
+  type MonsterKind,
+} from './entity';
 import { computeFov } from './fov';
 import {
   CONSUMABLES,
@@ -100,9 +112,9 @@ export function step(state: GameState, action: Action): StepResult {
   if (action.type === 'move') {
     const nx = p.x + action.dx;
     const ny = p.y + action.dy;
-    const target = state.monsters.find((m) => m.x === nx && m.y === ny);
+    const target = monsterAt(state, nx, ny);
     if (target) {
-      attack(state, rng, p, target);
+      playerAttack(state, rng, target);
     } else if (isWalkable(state.map, nx, ny)) {
       p.x = nx;
       p.y = ny;
@@ -165,6 +177,9 @@ function descend(state: GameState, rng: Rng): void {
   updateFov(state);
   pushLog(state, 'info', state.depth === 1 ? 'B1。> を探して下に降りよう。' : `B${state.depth} に降りた。少し回復した。`);
 }
+
+// ---------------------------------------------------------------------------
+// アイテム
 
 /** 足元のアイテムを拾う。何か起きたら true */
 function pickUp(state: GameState): boolean {
@@ -239,7 +254,6 @@ function revealMap(state: GameState): void {
   for (let y = 0; y < map.height; y++) {
     for (let x = 0; x < map.width; x++) {
       if (map.tiles[idx(map, x, y)] !== Tile.Wall) {
-        state.explored[idx(map, x, y)] = 1;
         for (let dy = -1; dy <= 1; dy++) {
           for (let dx = -1; dx <= 1; dx++) {
             if (inBounds(map, x + dx, y + dy)) state.explored[idx(map, x + dx, y + dy)] = 1;
@@ -250,47 +264,154 @@ function revealMap(state: GameState): void {
   }
 }
 
-function attack(state: GameState, rng: Rng, attacker: Actor, defender: Actor): void {
-  if (attacker.kind === 'player') {
-    const dmg = rng.int(1, attacker.atk + state.weapon);
-    defender.hp -= dmg;
-    pushLog(state, 'player', `${actorName(defender.kind)}に ${dmg} のダメージ。`);
-    if (defender.hp <= 0) {
-      state.monsters = state.monsters.filter((m) => m.id !== defender.id);
-      state.kills++;
-      pushLog(state, 'player', `${actorName(defender.kind)}を倒した。`);
-    }
+// ---------------------------------------------------------------------------
+// 戦闘
+
+function playerAttack(state: GameState, rng: Rng, target: Actor): void {
+  const p = state.player;
+  const dmg = rng.int(1, p.atk + state.weapon);
+  target.hp -= dmg;
+  pushLog(state, 'player', `${actorName(target.kind)}に ${dmg} のダメージ。`);
+  if (target.hp <= 0) {
+    killMonster(state, target);
     return;
   }
-
-  // 防具は被ダメージを減らすが、最低 1 は通る (序盤の防具で弱い敵が無害になるのを防ぐ)
-  const roll = rng.int(1, attacker.atk);
-  const dmg = Math.max(1, roll - state.armor);
-  const reduced = roll - dmg;
-  defender.hp -= dmg;
-  const note = reduced > 0 ? ` (防具で ${reduced} 軽減)` : '';
-  pushLog(state, 'enemy', `${actorName(attacker.kind)}から ${dmg} のダメージ。${note}`);
+  if (hasPassive(target.kind, 'split')) trySplit(state, rng, target);
 }
+
+function killMonster(state: GameState, m: Actor): void {
+  state.monsters = state.monsters.filter((x) => x.id !== m.id);
+  state.kills++;
+  pushLog(state, 'player', `${actorName(m.kind)}を倒した。`);
+}
+
+/**
+ * 敵からプレイヤーへの攻撃。
+ * 防具は被ダメージを減らすが、最低 1 は通る (序盤の防具で弱い敵が無害になるのを防ぐ)。
+ * pierce のときは防具を無視する。
+ */
+function monsterAttack(state: GameState, rng: Rng, m: Actor, opts: { pierce?: boolean; label?: string } = {}): void {
+  const p = state.player;
+  const roll = rng.int(1, m.atk);
+  const dmg = opts.pierce ? roll : Math.max(1, roll - state.armor);
+  const reduced = roll - dmg;
+  p.hp -= dmg;
+  const head = opts.label ?? `${actorName(m.kind)}から`;
+  const note = reduced > 0 ? ` (防具で ${reduced} 軽減)` : '';
+  pushLog(state, 'enemy', `${head} ${dmg} のダメージ。${note}`);
+}
+
+/** 分裂: 隣の空きマスに HP 半分の個体を置く。上限あり */
+function trySplit(state: GameState, rng: Rng, m: Actor): void {
+  const slimes = state.monsters.filter((x) => x.kind === 'slime').length;
+  if (slimes >= SLIME_CAP) return;
+  const half = Math.floor(m.hp / 2);
+  if (half < 1) return;
+  const spot = freeNeighbor(state, m.x, m.y, rng, false);
+  if (!spot) return;
+  m.hp -= half;
+  const child: Actor = { id: state.nextId++, kind: m.kind, x: spot.x, y: spot.y, hp: half, maxHp: half, atk: m.atk };
+  state.monsters.push(child);
+  pushLog(state, 'enemy', `${actorName(m.kind)}が分裂した。`);
+}
+
+// ---------------------------------------------------------------------------
+// 敵の行動
 
 function monstersAct(state: GameState, rng: Rng): void {
   const p = state.player;
   for (const m of [...state.monsters]) {
     if (p.hp <= 0) return;
-    const dx = p.x - m.x;
-    const dy = p.y - m.y;
-    const dist = Math.max(Math.abs(dx), Math.abs(dy));
-    if (dist === 1) {
-      attack(state, rng, m, p);
-    } else if (state.visible[idx(state.map, m.x, m.y)] === 1) {
-      // プレイヤーから見えている = 向こうからも見えているとみなして追ってくる
-      moveToward(state, m, Math.sign(dx), Math.sign(dy));
-    } else if (rng.chance(0.25)) {
-      moveToward(state, m, rng.int(-1, 1), rng.int(-1, 1));
+    if (!state.monsters.includes(m)) continue;
+    const def = MONSTERS[m.kind as MonsterKind];
+
+    if (def.passives.includes('regen') && m.hp < m.maxHp) m.hp++;
+    // 鈍重: id とターンの偶奇で手番を半分にする (個体ごとにずれるので一斉には止まらない)
+    if (def.passives.includes('slow') && (state.turn + m.id) % 2 === 1) continue;
+
+    const actions = def.passives.includes('fast') ? 2 : 1;
+    for (let i = 0; i < actions; i++) {
+      // 攻撃や技を使ったらこのターンは終わり (俊敏でも攻撃は 1 回)
+      if (monsterTurn(state, rng, m, def)) break;
+      if (p.hp <= 0) break;
+    }
+  }
+}
+
+/** 1 回分の行動。攻撃か技を使ったら true、移動だけなら false */
+function monsterTurn(state: GameState, rng: Rng, m: Actor, def: MonsterDef): boolean {
+  const p = state.player;
+  const dx = p.x - m.x;
+  const dy = p.y - m.y;
+  const dist = Math.max(Math.abs(dx), Math.abs(dy));
+  const sees = state.visible[idx(state.map, m.x, m.y)] === 1;
+
+  if (def.action && rng.chance(def.action.chance) && tryAction(state, rng, m, def.action.kind, dist, sees)) {
+    return true;
+  }
+
+  if (dist === 1) {
+    monsterAttack(state, rng, m);
+    return true;
+  }
+
+  if (sees) {
+    // プレイヤーから見えている = 向こうからも見えているとみなして追ってくる
+    let sx = Math.sign(dx);
+    let sy = Math.sign(dy);
+    if (def.passives.includes('erratic') && rng.chance(0.5)) {
+      sx = rng.int(-1, 1);
+      sy = rng.int(-1, 1);
+    }
+    moveToward(state, m, sx, sy);
+  } else if (rng.chance(0.25)) {
+    moveToward(state, m, rng.int(-1, 1), rng.int(-1, 1));
+  }
+  return false;
+}
+
+/** 技を試す。条件が合わなければ false を返して通常行動に戻る */
+function tryAction(state: GameState, rng: Rng, m: Actor, kind: ActionKind, dist: number, sees: boolean): boolean {
+  const p = state.player;
+  const name = actorName(m.kind);
+  switch (kind) {
+    case 'doubleAttack':
+      if (dist !== 1) return false;
+      pushLog(state, 'enemy', `${name}が続けて切りつけた。`);
+      monsterAttack(state, rng, m);
+      if (p.hp > 0) monsterAttack(state, rng, m);
+      return true;
+
+    case 'smash':
+      if (dist !== 1) return false;
+      monsterAttack(state, rng, m, { pierce: true, label: `${name}の強打!` });
+      return true;
+
+    case 'leap': {
+      if (dist !== 2 || !sees) return false;
+      const spot = freeNeighbor(state, p.x, p.y, rng, hasPassive(m.kind, 'phasing'), m);
+      if (!spot) return false;
+      m.x = spot.x;
+      m.y = spot.y;
+      pushLog(state, 'enemy', `${name}が跳びかかった。`);
+      monsterAttack(state, rng, m);
+      return true;
+    }
+
+    case 'breath': {
+      if (!sees || dist < 2 || dist > 4) return false;
+      const roll = Math.floor(m.atk / 2) + state.depth;
+      const dmg = Math.max(1, roll - state.armor);
+      p.hp -= dmg;
+      const note = roll - dmg > 0 ? ` (防具で ${roll - dmg} 軽減)` : '';
+      pushLog(state, 'enemy', `${name}が炎を吐いた。${dmg} のダメージ。${note}`);
+      return true;
     }
   }
 }
 
 function moveToward(state: GameState, m: Actor, sx: number, sy: number): void {
+  const phasing = hasPassive(m.kind, 'phasing');
   const candidates = [
     [sx, sy],
     [sx, 0],
@@ -300,7 +421,7 @@ function moveToward(state: GameState, m: Actor, sx: number, sy: number): void {
     if (cx === 0 && cy === 0) continue;
     const nx = m.x + cx;
     const ny = m.y + cy;
-    if (!isWalkable(state.map, nx, ny)) continue;
+    if (!canEnter(state, nx, ny, phasing)) continue;
     if (occupied(state, nx, ny)) continue;
     m.x = nx;
     m.y = ny;
@@ -308,11 +429,50 @@ function moveToward(state: GameState, m: Actor, sx: number, sy: number): void {
   }
 }
 
+/** 壁抜けなら盤面内ならどこでも、そうでなければ床だけ */
+function canEnter(state: GameState, x: number, y: number, phasing: boolean): boolean {
+  return phasing ? inBounds(state.map, x, y) : isWalkable(state.map, x, y);
+}
+
+/** (x, y) の周囲 8 マスから入れる空きマスを 1 つ選ぶ。mover が近い順に試す */
+function freeNeighbor(
+  state: GameState,
+  x: number,
+  y: number,
+  rng: Rng,
+  phasing: boolean,
+  mover?: Actor,
+): { x: number; y: number } | null {
+  const spots: { x: number; y: number }[] = [];
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      if (dx === 0 && dy === 0) continue;
+      const nx = x + dx;
+      const ny = y + dy;
+      if (!canEnter(state, nx, ny, phasing)) continue;
+      if (occupied(state, nx, ny)) continue;
+      spots.push({ x: nx, y: ny });
+    }
+  }
+  if (spots.length === 0) return null;
+  if (mover) {
+    spots.sort((a, b) => Math.hypot(a.x - mover.x, a.y - mover.y) - Math.hypot(b.x - mover.x, b.y - mover.y));
+    return spots[0];
+  }
+  return rng.pick(spots);
+}
+
+function monsterAt(state: GameState, x: number, y: number): Actor | undefined {
+  return state.monsters.find((m) => m.x === x && m.y === y);
+}
+
 function occupied(state: GameState, x: number, y: number): boolean {
   const p = state.player;
   if (p.x === x && p.y === y) return true;
-  return state.monsters.some((m) => m.x === x && m.y === y);
+  return monsterAt(state, x, y) !== undefined;
 }
+
+// ---------------------------------------------------------------------------
 
 function updateFov(state: GameState): void {
   computeFov(state.map, state.player.x, state.player.y, FOV_RADIUS, state.visible);
@@ -369,3 +529,6 @@ export function toViewModel(state: GameState): ViewModel {
     gameOver: state.over,
   };
 }
+
+// createMonster は分裂以外でも使えるように再エクスポートしておく (テストや将来の召喚用)
+export { createMonster };
