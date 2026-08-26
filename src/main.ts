@@ -1,5 +1,5 @@
 import './style.css';
-import { newGame, step, toViewModel, type Action, type GameState } from './game';
+import { newGame, step, toViewModel, visibleMonsterCount, type Action, type GameState } from './game';
 import { bindButtons, bindKeyboard } from './input';
 import type { Renderer } from './render/renderer';
 import { TextRenderer } from './render/text-renderer';
@@ -22,10 +22,24 @@ function render(): void {
   renderer.draw(toViewModel(state));
 }
 
-function act(action: Action): void {
-  step(state, action);
+/**
+ * 1 手進めて描画する。
+ * 戻り値は「長押しの連続移動を続けてよいか」。
+ * 壁にぶつかった・敵が見えている・ダメージを受けた・階を降りた・倒れた、のどれかで false。
+ */
+function act(action: Action): boolean {
+  const hpBefore = state.player.hp;
+  const depthBefore = state.depth;
+  const result = step(state, action);
   saveGame(state);
   render();
+  return (
+    result.acted &&
+    !state.over &&
+    state.depth === depthBefore &&
+    state.player.hp >= hpBefore &&
+    visibleMonsterCount(state) === 0
+  );
 }
 
 // --- メニュー (seed の表示・入力・新しいゲーム) ---

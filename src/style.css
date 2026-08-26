@@ -62,10 +62,12 @@ button {
   -webkit-tap-highlight-color: transparent;
   user-select: none;
   -webkit-user-select: none;
+  -webkit-touch-callout: none;
   cursor: pointer;
 }
 
-button:active {
+button:active,
+button.holding {
   background: var(--panel-active);
 }
 

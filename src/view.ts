@@ -13,6 +13,14 @@ export interface ViewCell {
   vis: Visibility;
 }
 
+/** ログの分類。色分けは描画層が決める */
+export type LogKind = 'player' | 'enemy' | 'info' | 'alert';
+
+export interface LogEntry {
+  text: string;
+  kind: LogKind;
+}
+
 export interface ViewActor {
   kind: ActorKind;
   x: number;
@@ -32,6 +40,6 @@ export interface ViewModel {
   kills: number;
   seed: string;
   /** 古い順。描画層が末尾から必要な行数だけ使う */
-  log: string[];
+  log: LogEntry[];
   gameOver: boolean;
 }

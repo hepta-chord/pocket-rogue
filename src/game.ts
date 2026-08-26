@@ -2,12 +2,19 @@ import { actorName, createPlayer, spawnMonsters, type Actor } from './entity';
 import { computeFov } from './fov';
 import { Tile, generateMap, idx, isWalkable, roomCenter, tileAt, type GameMap } from './map';
 import { Rng, hashSeed } from './rng';
-import type { CellKind, ViewActor, ViewCell, ViewModel } from './view';
+import type { CellKind, LogEntry, LogKind, ViewActor, ViewCell, ViewModel } from './view';
 
 export type Action = { type: 'move'; dx: number; dy: number } | { type: 'wait' };
 
+export interface StepResult {
+  /** ターンが進んだか。壁にぶつかっただけなら false */
+  acted: boolean;
+}
+
+export const SAVE_VERSION = 2;
+
 export interface GameState {
-  version: 1;
+  version: typeof SAVE_VERSION;
   seed: string;
   rngState: number;
   depth: number;
@@ -21,7 +28,7 @@ export interface GameState {
   visible: number[];
   /** 0/1。一度でも見た位置 */
   explored: number[];
-  log: string[];
+  log: LogEntry[];
   over: boolean;
 }
 
@@ -34,7 +41,7 @@ const REGEN_EVERY = 5;
 export function newGame(seed: string): GameState {
   const rng = new Rng(hashSeed(seed));
   const state: GameState = {
-    version: 1,
+    version: SAVE_VERSION,
     seed,
     rngState: rng.state,
     depth: 0,
@@ -49,15 +56,15 @@ export function newGame(seed: string): GameState {
     log: [],
     over: false,
   };
-  pushLog(state, `seed ${seed} のダンジョンに入った。`);
+  pushLog(state, 'info', `seed ${seed} のダンジョンに入った。`);
   descend(state, rng);
   state.rngState = rng.state;
   return state;
 }
 
 /** 1 ターン進める。壁にぶつかっただけならターンは消費しない */
-export function step(state: GameState, action: Action): void {
-  if (state.over) return;
+export function step(state: GameState, action: Action): StepResult {
+  if (state.over) return { acted: false };
   const rng = new Rng(state.rngState);
   const p = state.player;
 
@@ -72,7 +79,7 @@ export function step(state: GameState, action: Action): void {
       p.y = ny;
     } else {
       state.rngState = rng.state;
-      return;
+      return { acted: false };
     }
   }
 
@@ -80,7 +87,7 @@ export function step(state: GameState, action: Action): void {
     state.turn++;
     descend(state, rng);
     state.rngState = rng.state;
-    return;
+    return { acted: true };
   }
 
   monstersAct(state, rng);
@@ -91,9 +98,15 @@ export function step(state: GameState, action: Action): void {
   if (p.hp <= 0) {
     p.hp = 0;
     state.over = true;
-    pushLog(state, `あなたは倒れた。B${state.depth} で ${state.kills} 体を倒した。`);
+    pushLog(state, 'alert', `あなたは倒れた。B${state.depth} で ${state.kills} 体を倒した。`);
   }
   state.rngState = rng.state;
+  return { acted: true };
+}
+
+/** 今プレイヤーの視界にいる敵の数。連続移動を止める判定に使う */
+export function visibleMonsterCount(state: GameState): number {
+  return state.monsters.filter((m) => state.visible[idx(state.map, m.x, m.y)] === 1).length;
 }
 
 function descend(state: GameState, rng: Rng): void {
@@ -114,18 +127,21 @@ function descend(state: GameState, rng: Rng): void {
   state.visible = new Array<number>(MAP_W * MAP_H).fill(0);
   state.explored = new Array<number>(MAP_W * MAP_H).fill(0);
   updateFov(state);
-  pushLog(state, state.depth === 1 ? 'B1。> を探して下に降りよう。' : `B${state.depth} に降りた。少し回復した。`);
+  pushLog(state, 'info', state.depth === 1 ? 'B1。> を探して下に降りよう。' : `B${state.depth} に降りた。少し回復した。`);
 }
 
 function attack(state: GameState, rng: Rng, attacker: Actor, defender: Actor): void {
   const dmg = rng.int(1, attacker.atk);
   defender.hp -= dmg;
-  const who = attacker.kind === 'player' ? `${actorName(defender.kind)}に` : `${actorName(attacker.kind)}から`;
-  pushLog(state, `${who} ${dmg} のダメージ。`);
+  if (attacker.kind === 'player') {
+    pushLog(state, 'player', `${actorName(defender.kind)}に ${dmg} のダメージ。`);
+  } else {
+    pushLog(state, 'enemy', `${actorName(attacker.kind)}から ${dmg} のダメージ。`);
+  }
   if (defender.hp <= 0 && defender.kind !== 'player') {
     state.monsters = state.monsters.filter((m) => m.id !== defender.id);
     state.kills++;
-    pushLog(state, `${actorName(defender.kind)}を倒した。`);
+    pushLog(state, 'player', `${actorName(defender.kind)}を倒した。`);
   }
 }
 
@@ -178,8 +194,8 @@ function updateFov(state: GameState): void {
   }
 }
 
-function pushLog(state: GameState, msg: string): void {
-  state.log.push(msg);
+function pushLog(state: GameState, kind: LogKind, text: string): void {
+  state.log.push({ kind, text });
   if (state.log.length > LOG_MAX) state.log.splice(0, state.log.length - LOG_MAX);
 }
 

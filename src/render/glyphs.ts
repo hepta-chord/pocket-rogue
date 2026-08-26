@@ -1,5 +1,5 @@
 import type { ActorKind } from '../entity';
-import type { CellKind } from '../view';
+import type { CellKind, LogKind } from '../view';
 
 // 文字描画の見た目はこのファイルだけで決まる。
 // 種類 → 文字と色の対応表。ゲーム本体はここを知らない。
@@ -31,10 +31,19 @@ export const COLORS = {
   hud: '#d0d0d8',
   hudDim: '#8a8a96',
   hpLow: '#ff6b6b',
-  log: '#c0c0c8',
-  logOld: '#70707a',
   overlay: 'rgba(16, 16, 20, 0.85)',
 };
+
+/** ログの分類ごとの色。自分の行動は青系、敵の行動は赤系 */
+export const LOG_COLORS: Record<LogKind, string> = {
+  player: '#8fc6ff',
+  enemy: '#ff9b9b',
+  info: '#b8b8c0',
+  alert: '#ffd166',
+};
+
+/** 最新行以外のログの明るさ */
+export const LOG_OLD_ALPHA = 0.55;
 
 /** 見えていないが記憶している場所の明るさ */
 export const REMEMBERED_ALPHA = 0.4;

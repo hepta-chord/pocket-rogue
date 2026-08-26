@@ -50,14 +50,46 @@ export function bindKeyboard(onAction: (a: Action) => void, isBlocked: () => boo
   });
 }
 
-/** data-dir="dx,dy" を持つボタンを Action に変換する。"0,0" は待機 */
-export function bindButtons(root: HTMLElement, onAction: (a: Action) => void): void {
+/** 長押しと判定するまでの時間と、連続移動の間隔 (ms) */
+const HOLD_DELAY = 350;
+const REPEAT_INTERVAL = 110;
+
+/**
+ * data-dir="dx,dy" を持つボタンを Action に変換する。"0,0" は待機。
+ * 押した瞬間に 1 回、押し続けると一定間隔で繰り返す。
+ * onAction が false を返したら (壁・敵の出現・被弾など) 繰り返しを止める。
+ */
+export function bindButtons(root: HTMLElement, onAction: (a: Action) => boolean): void {
   root.querySelectorAll<HTMLButtonElement>('[data-dir]').forEach((btn) => {
     const [dx, dy] = (btn.dataset.dir ?? '0,0').split(',').map(Number);
+    const action: Action = dx === 0 && dy === 0 ? { type: 'wait' } : { type: 'move', dx, dy };
+    let holdTimer: number | null = null;
+    let repeatTimer: number | null = null;
+
+    const stop = (): void => {
+      if (holdTimer !== null) window.clearTimeout(holdTimer);
+      if (repeatTimer !== null) window.clearInterval(repeatTimer);
+      holdTimer = null;
+      repeatTimer = null;
+      btn.classList.remove('holding');
+    };
+
     btn.addEventListener('pointerdown', (e) => {
       e.preventDefault();
-      if (dx === 0 && dy === 0) onAction({ type: 'wait' });
-      else onAction({ type: 'move', dx, dy });
+      stop();
+      btn.setPointerCapture(e.pointerId);
+      if (!onAction(action)) return;
+      holdTimer = window.setTimeout(() => {
+        btn.classList.add('holding');
+        repeatTimer = window.setInterval(() => {
+          if (!onAction(action)) stop();
+        }, REPEAT_INTERVAL);
+      }, HOLD_DELAY);
     });
+    for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture'] as const) {
+      btn.addEventListener(ev, stop);
+    }
+    // 長押しでコンテキストメニューやテキスト選択が出ないようにする
+    btn.addEventListener('contextmenu', (e) => e.preventDefault());
   });
 }

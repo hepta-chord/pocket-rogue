@@ -1,5 +1,5 @@
 import type { ViewModel } from '../view';
-import { ACTOR_GLYPHS, CELL_GLYPHS, COLORS, FONT_STACK, REMEMBERED_ALPHA } from './glyphs';
+import { ACTOR_GLYPHS, CELL_GLYPHS, COLORS, FONT_STACK, LOG_COLORS, LOG_OLD_ALPHA, REMEMBERED_ALPHA } from './glyphs';
 import type { Renderer } from './renderer';
 
 const HUD_ROWS = 1;
@@ -143,9 +143,11 @@ export class TextRenderer implements Renderer {
     const base = height - LOG_ROWS * cell;
     for (let i = 0; i < lines.length; i++) {
       const isLast = i === lines.length - 1;
-      ctx.fillStyle = isLast ? COLORS.log : COLORS.logOld;
-      ctx.fillText(lines[i], 6, base + i * cell + cell / 2);
+      ctx.globalAlpha = isLast ? 1 : LOG_OLD_ALPHA;
+      ctx.fillStyle = LOG_COLORS[lines[i].kind];
+      ctx.fillText(lines[i].text, 6, base + i * cell + cell / 2);
     }
+    ctx.globalAlpha = 1;
   }
 
   private drawGameOver(vm: ViewModel, width: number, height: number): void {
