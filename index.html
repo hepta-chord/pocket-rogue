@@ -16,6 +16,17 @@
     <div id="app">
       <canvas id="game"></canvas>
       <div id="controls">
+        <div id="slots">
+          <button type="button" data-item="potion" aria-label="回復薬を使う">
+            <span class="glyph potion">!</span><span class="name">回復薬</span><span class="count">0</span>
+          </button>
+          <button type="button" data-item="thunder" aria-label="雷の巻物を使う">
+            <span class="glyph thunder">?</span><span class="name">雷</span><span class="count">0</span>
+          </button>
+          <button type="button" data-item="map" aria-label="地図の巻物を使う">
+            <span class="glyph map">?</span><span class="name">地図</span><span class="count">0</span>
+          </button>
+        </div>
         <div id="pad">
           <button type="button" data-dir="-1,-1" aria-label="左上">↖</button>
           <button type="button" data-dir="0,-1" aria-label="上">↑</button>

@@ -4,6 +4,7 @@
 // これにより TextRenderer を TileRenderer に差し替えてもゲーム本体は変わらない。
 
 import type { ActorKind } from './entity';
+import type { ConsumableKind, ItemKind } from './items';
 
 export type CellKind = 'wall' | 'floor' | 'stairs' | 'unknown';
 export type Visibility = 'visible' | 'remembered' | 'unknown';
@@ -27,14 +28,24 @@ export interface ViewActor {
   y: number;
 }
 
+export interface ViewItem {
+  kind: ItemKind;
+  x: number;
+  y: number;
+}
+
 export interface ViewModel {
   width: number;
   height: number;
   /** width * height。行優先 (index = y * width + x) */
   cells: ViewCell[];
+  /** 一度見た場所に落ちているアイテム。可視かどうかは cells で判定する */
+  items: ViewItem[];
   /** 今見えているアクターだけ。プレイヤーを含む */
   actors: ViewActor[];
-  player: { x: number; y: number; hp: number; maxHp: number; atk: number };
+  player: { x: number; y: number; hp: number; maxHp: number; atk: number; def: number };
+  /** スロット表示用。CONSUMABLES の順 */
+  inventory: { kind: ConsumableKind; count: number }[];
   depth: number;
   turn: number;
   kills: number;

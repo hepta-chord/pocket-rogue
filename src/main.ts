@@ -1,6 +1,7 @@
 import './style.css';
-import { newGame, step, toViewModel, visibleMonsterCount, type Action, type GameState } from './game';
-import { bindButtons, bindKeyboard } from './input';
+import { newGame, step, toViewModel, visibleMonsters, type Action, type GameState } from './game';
+import { bindButtons, bindKeyboard, bindSlots } from './input';
+import type { ViewModel } from './view';
 import type { Renderer } from './render/renderer';
 import { TextRenderer } from './render/text-renderer';
 import { normalizeSeed, randomSeedString } from './rng';
@@ -18,27 +19,40 @@ const renderer: Renderer = new TextRenderer(canvas);
 
 let state: GameState = loadGame() ?? newGame(randomSeedString());
 
+const slotButtons = Array.from(byId('slots').querySelectorAll<HTMLButtonElement>('[data-item]'));
+
+function renderSlots(vm: ViewModel): void {
+  for (const btn of slotButtons) {
+    const entry = vm.inventory.find((e) => e.kind === btn.dataset.item);
+    const count = entry?.count ?? 0;
+    const countEl = btn.querySelector('.count');
+    if (countEl) countEl.textContent = String(count);
+    btn.disabled = count === 0 || vm.gameOver;
+  }
+}
+
 function render(): void {
-  renderer.draw(toViewModel(state));
+  const vm = toViewModel(state);
+  renderer.draw(vm);
+  renderSlots(vm);
 }
 
 /**
  * 1 手進めて描画する。
  * 戻り値は「長押しの連続移動を続けてよいか」。
- * 壁にぶつかった・敵が見えている・ダメージを受けた・階を降りた・倒れた、のどれかで false。
+ * 壁にぶつかった・敵が見えている・ダメージを受けた・アイテムを拾った・階を降りた・倒れた、のどれかで false。
  */
 function act(action: Action): boolean {
   const hpBefore = state.player.hp;
-  const depthBefore = state.depth;
   const result = step(state, action);
   saveGame(state);
   render();
   return (
     result.acted &&
+    !result.interrupt &&
     !state.over &&
-    state.depth === depthBefore &&
     state.player.hp >= hpBefore &&
-    visibleMonsterCount(state) === 0
+    visibleMonsters(state).length === 0
   );
 }
 
@@ -72,6 +86,7 @@ byId('menu-close').addEventListener('click', () => menu.close());
 // --- 入力 ---
 bindKeyboard(act, () => menu.open);
 bindButtons(byId('pad'), act);
+bindSlots(byId('slots'), (item) => act({ type: 'use', item }));
 
 // --- 画面サイズ ---
 window.addEventListener('resize', () => renderer.resize());

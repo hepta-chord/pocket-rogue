@@ -1,4 +1,5 @@
 import type { Action } from './game';
+import type { ConsumableKind } from './items';
 
 // キーボードと画面ボタンを同じ Action に揃える。
 
@@ -91,5 +92,13 @@ export function bindButtons(root: HTMLElement, onAction: (a: Action) => boolean)
     }
     // 長押しでコンテキストメニューやテキスト選択が出ないようにする
     btn.addEventListener('contextmenu', (e) => e.preventDefault());
+  });
+}
+
+/** data-item="<ConsumableKind>" を持つスロットボタン。タップで即使用 */
+export function bindSlots(root: HTMLElement, onUse: (kind: ConsumableKind) => void): void {
+  root.querySelectorAll<HTMLButtonElement>('[data-item]').forEach((btn) => {
+    const kind = btn.dataset.item as ConsumableKind;
+    btn.addEventListener('click', () => onUse(kind));
   });
 }

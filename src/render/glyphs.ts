@@ -1,4 +1,5 @@
 import type { ActorKind } from '../entity';
+import type { ItemKind } from '../items';
 import type { CellKind, LogKind } from '../view';
 
 // 文字描画の見た目はこのファイルだけで決まる。
@@ -24,6 +25,14 @@ export const ACTOR_GLYPHS: Record<ActorKind, Glyph> = {
   orc: { ch: 'o', fg: '#f08c4a' },
   troll: { ch: 'T', fg: '#5aa9e6' },
   dragon: { ch: 'D', fg: '#ff5c5c' },
+};
+
+export const ITEM_GLYPHS: Record<ItemKind, Glyph> = {
+  potion: { ch: '!', fg: '#ff8ad8' },
+  thunder: { ch: '?', fg: '#ffe066' },
+  map: { ch: '?', fg: '#7fe0ff' },
+  weapon: { ch: ')', fg: '#d0d0d0' },
+  armor: { ch: '[', fg: '#a0c4ff' },
 };
 
 export const COLORS = {

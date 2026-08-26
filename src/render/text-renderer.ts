@@ -1,5 +1,14 @@
 import type { ViewModel } from '../view';
-import { ACTOR_GLYPHS, CELL_GLYPHS, COLORS, FONT_STACK, LOG_COLORS, LOG_OLD_ALPHA, REMEMBERED_ALPHA } from './glyphs';
+import {
+  ACTOR_GLYPHS,
+  CELL_GLYPHS,
+  COLORS,
+  FONT_STACK,
+  ITEM_GLYPHS,
+  LOG_COLORS,
+  LOG_OLD_ALPHA,
+  REMEMBERED_ALPHA,
+} from './glyphs';
 import type { Renderer } from './renderer';
 
 const HUD_ROWS = 1;
@@ -100,6 +109,20 @@ export class TextRenderer implements Renderer {
     }
     ctx.globalAlpha = 1;
 
+    for (const it of vm.items) {
+      const sx = it.x - this.camX;
+      const sy = it.y - this.camY;
+      if (sx < 0 || sy < 0 || sx >= this.cols || sy >= this.rows) continue;
+      const g = ITEM_GLYPHS[it.kind];
+      const vis = vm.cells[it.y * vm.width + it.x].vis;
+      ctx.globalAlpha = vis === 'visible' ? 1 : REMEMBERED_ALPHA;
+      ctx.fillStyle = COLORS.bg;
+      ctx.fillRect(sx * cell, top + sy * cell, cell, cell);
+      ctx.fillStyle = g.fg;
+      ctx.fillText(g.ch, sx * cell + cell / 2, top + sy * cell + cell / 2);
+    }
+    ctx.globalAlpha = 1;
+
     for (const a of vm.actors) {
       const sx = a.x - this.camX;
       const sy = a.y - this.camY;
@@ -118,7 +141,7 @@ export class TextRenderer implements Renderer {
     ctx.font = `${size}px ${FONT_STACK}`;
     ctx.textBaseline = 'middle';
     const y = cell / 2;
-    const { hp, maxHp, atk } = vm.player;
+    const { hp, maxHp, atk, def } = vm.player;
 
     ctx.textAlign = 'left';
     ctx.fillStyle = COLORS.hud;
@@ -127,6 +150,7 @@ export class TextRenderer implements Renderer {
     ctx.fillText(`HP ${hp}/${maxHp}`, 6 + size * 2.5, y);
     ctx.fillStyle = COLORS.hud;
     ctx.fillText(`ATK ${atk}`, 6 + size * 9, y);
+    ctx.fillText(`DEF ${def}`, 6 + size * 13.5, y);
 
     ctx.textAlign = 'right';
     ctx.fillStyle = COLORS.hudDim;
