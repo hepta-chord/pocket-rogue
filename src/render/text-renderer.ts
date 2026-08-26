@@ -11,7 +11,7 @@ import {
 } from './glyphs';
 import type { Renderer } from './renderer';
 
-const HUD_ROWS = 1;
+const HUD_ROWS = 2;
 const LOG_ROWS = 3;
 const TARGET_COLS = 21;
 const MIN_CELL = 12;
@@ -137,24 +137,48 @@ export class TextRenderer implements Renderer {
 
   private drawHud(vm: ViewModel, width: number): void {
     const { ctx, cell } = this;
-    const size = Math.floor(cell * 0.6);
+    const size = Math.floor(cell * 0.55);
     ctx.font = `${size}px ${FONT_STACK}`;
     ctx.textBaseline = 'middle';
-    const y = cell / 2;
-    const { hp, maxHp, atk, def } = vm.player;
+    const { hp, maxHp, atk, def, level, xp, xpNext } = vm.player;
 
-    ctx.textAlign = 'left';
-    ctx.fillStyle = COLORS.hud;
-    ctx.fillText(`B${vm.depth}`, 6, y);
-    ctx.fillStyle = hp <= maxHp * 0.3 ? COLORS.hpLow : COLORS.hud;
-    ctx.fillText(`HP ${hp}/${maxHp}`, 6 + size * 2.5, y);
-    ctx.fillStyle = COLORS.hud;
-    ctx.fillText(`ATK ${atk}`, 6 + size * 9, y);
-    ctx.fillText(`DEF ${def}`, 6 + size * 13.5, y);
+    this.drawSegments(
+      [
+        { text: `B${vm.depth}`, color: COLORS.hud },
+        { text: `LV${level}`, color: COLORS.hud },
+        { text: `HP ${hp}/${maxHp}`, color: hp <= maxHp * 0.3 ? COLORS.hpLow : COLORS.hud },
+      ],
+      cell * 0.5,
+      size,
+    );
+    this.drawSegments(
+      [
+        { text: `ATK ${atk}`, color: COLORS.hudDim },
+        { text: `DEF ${def}`, color: COLORS.hudDim },
+        { text: `XP ${xp}/${xpNext}`, color: COLORS.hudDim },
+      ],
+      cell * 1.5,
+      size,
+    );
 
+    // スコアは右端に置く。1 行目と 2 行目にまたがらないよう 1 行目の右へ
     ctx.textAlign = 'right';
+    ctx.fillStyle = COLORS.hud;
+    ctx.fillText(`${vm.score}`, width - 54, cell * 0.5);
     ctx.fillStyle = COLORS.hudDim;
-    ctx.fillText(`T${vm.turn}`, width - 52, y);
+    ctx.fillText(`T${vm.turn}`, width - 54, cell * 1.5);
+  }
+
+  /** 左から順に、実測幅ぶんずつずらして描く (項目が重ならないようにする) */
+  private drawSegments(segs: { text: string; color: string }[], y: number, size: number): void {
+    const { ctx } = this;
+    ctx.textAlign = 'left';
+    let x = 6;
+    for (const s of segs) {
+      ctx.fillStyle = s.color;
+      ctx.fillText(s.text, x, y);
+      x += ctx.measureText(s.text).width + size;
+    }
   }
 
   private drawLog(vm: ViewModel, height: number): void {
@@ -182,15 +206,17 @@ export class TextRenderer implements Renderer {
     ctx.textBaseline = 'middle';
     const cy = height / 2;
     ctx.fillStyle = COLORS.hpLow;
-    ctx.font = `bold ${Math.floor(cell * 1.3)}px ${FONT_STACK}`;
-    ctx.fillText('ゲームオーバー', width / 2, cy - cell * 2);
+    ctx.font = `bold ${Math.floor(cell * 1.2)}px ${FONT_STACK}`;
+    ctx.fillText('ゲームオーバー', width / 2, cy - cell * 2.4);
     ctx.fillStyle = COLORS.hud;
-    ctx.font = `${Math.floor(cell * 0.8)}px ${FONT_STACK}`;
-    ctx.fillText(`B${vm.depth} まで到達  ${vm.kills} 体撃破`, width / 2, cy);
-    ctx.fillText(`seed: ${vm.seed}`, width / 2, cy + cell * 1.3);
+    ctx.font = `bold ${Math.floor(cell * 1.6)}px ${FONT_STACK}`;
+    ctx.fillText(`${vm.score}`, width / 2, cy - cell * 0.6);
+    ctx.font = `${Math.floor(cell * 0.75)}px ${FONT_STACK}`;
+    ctx.fillText(`B${vm.depth}  LV${vm.player.level}  ${vm.kills} 体撃破`, width / 2, cy + cell * 0.8);
     ctx.fillStyle = COLORS.hudDim;
     ctx.font = `${Math.floor(cell * 0.65)}px ${FONT_STACK}`;
-    ctx.fillText('右上の ≡ から新しいゲーム', width / 2, cy + cell * 3);
+    ctx.fillText(`seed: ${vm.seed}`, width / 2, cy + cell * 2);
+    ctx.fillText('右上の ≡ から新しいゲーム', width / 2, cy + cell * 3.2);
   }
 }
 

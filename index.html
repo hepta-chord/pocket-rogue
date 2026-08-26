@@ -53,9 +53,34 @@
       </div>
       <div class="row actions">
         <button type="button" id="new-game" class="primary">この seed で新しいゲーム</button>
+        <button type="button" id="menu-scores">ハイスコア</button>
         <button type="button" id="menu-close">閉じる</button>
       </div>
       <p class="hint small">PC はカーソルキー・テンキー・hjklyubn で移動、. または Space で待機。</p>
+    </dialog>
+
+    <dialog id="gameover">
+      <h2>ゲームオーバー</h2>
+      <p id="go-rank" class="rank"></p>
+      <div class="stats">
+        <div class="score"><span id="go-score">0</span><small>点</small></div>
+        <ul id="go-detail"></ul>
+      </div>
+      <div class="row actions">
+        <button type="button" id="go-retry" class="primary">同じ seed でもう一度</button>
+        <button type="button" id="go-new">新しい seed で始める</button>
+        <button type="button" id="go-scores">ハイスコア</button>
+        <button type="button" id="go-close">閉じる</button>
+      </div>
+    </dialog>
+
+    <dialog id="scores">
+      <h2>ハイスコア</h2>
+      <ol id="score-list"></ol>
+      <p class="hint small">seed をタップすると、その seed で新しいゲームを始めます。</p>
+      <div class="row actions">
+        <button type="button" id="scores-close">閉じる</button>
+      </div>
     </dialog>
 
     <script type="module" src="/src/main.ts"></script>

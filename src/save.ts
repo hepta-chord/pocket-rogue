@@ -38,6 +38,11 @@ interface RawSave {
   inventory?: unknown;
   weapon?: unknown;
   armor?: unknown;
+  level?: unknown;
+  xp?: unknown;
+  score?: unknown;
+  recorded?: unknown;
+  depth?: unknown;
 }
 
 /** 古い形式のセーブを現在の形式に直す。直せないものは version を変えずに返し、呼び出し側で捨てる */
@@ -54,6 +59,15 @@ function migrate(data: RawSave): void {
     data.weapon = 0;
     data.armor = 0;
     data.version = 3;
+  }
+  if (data.version === 3) {
+    // v3: 経験値とスコアが無かった。レベル 1 から始め、到達済みの階ぶんだけスコアを与える
+    const depth = typeof data.depth === 'number' ? data.depth : 1;
+    data.level = 1;
+    data.xp = 0;
+    data.score = ((depth * (depth + 1)) / 2) * 20;
+    data.recorded = false;
+    data.version = 4;
   }
 }
 

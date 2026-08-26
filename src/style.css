@@ -201,3 +201,101 @@ dialog .hint.small {
   font-size: 0.75rem;
   margin: 0;
 }
+
+/* --- ゲームオーバー --- */
+
+.rank {
+  margin: 0 0 12px;
+  font-size: 0.9rem;
+  color: #ffd166;
+}
+
+.rank:empty {
+  display: none;
+}
+
+.stats {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.stats .score {
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 2rem;
+  font-weight: bold;
+  line-height: 1;
+}
+
+.stats .score small {
+  font-size: 0.8rem;
+  font-weight: normal;
+  opacity: 0.6;
+  margin-left: 2px;
+}
+
+.stats ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.85rem;
+  opacity: 0.85;
+}
+
+/* --- ハイスコア一覧 --- */
+
+#score-list {
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 0.9rem;
+}
+
+#score-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+#score-list li:last-child {
+  border-bottom: none;
+}
+
+#score-list .no {
+  width: 1.4em;
+  opacity: 0.6;
+}
+
+#score-list .pts {
+  width: 4.5em;
+  text-align: right;
+  font-weight: bold;
+}
+
+#score-list .meta {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.75rem;
+  opacity: 0.7;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#score-list .seed {
+  padding: 4px 8px;
+  font-size: 0.8rem;
+  font-family: inherit;
+}
+
+#score-list .empty {
+  display: block;
+  padding: 8px 0;
+  opacity: 0.6;
+  font-size: 0.85rem;
+  border: none;
+}

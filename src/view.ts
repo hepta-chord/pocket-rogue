@@ -43,12 +43,26 @@ export interface ViewModel {
   items: ViewItem[];
   /** 今見えているアクターだけ。プレイヤーを含む */
   actors: ViewActor[];
-  player: { x: number; y: number; hp: number; maxHp: number; atk: number; def: number };
+  player: {
+    x: number;
+    y: number;
+    hp: number;
+    maxHp: number;
+    /** 武器の補正を含んだ攻撃力 */
+    atk: number;
+    /** 防具の値 */
+    def: number;
+    level: number;
+    xp: number;
+    /** 次のレベルまでに必要な経験値 */
+    xpNext: number;
+  };
   /** スロット表示用。CONSUMABLES の順 */
   inventory: { kind: ConsumableKind; count: number }[];
   depth: number;
   turn: number;
   kills: number;
+  score: number;
   seed: string;
   /** 古い順。描画層が末尾から必要な行数だけ使う */
   log: LogEntry[];

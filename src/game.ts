@@ -39,7 +39,17 @@ export interface StepResult {
   interrupt: boolean;
 }
 
-export const SAVE_VERSION = 3;
+export const SAVE_VERSION = 4;
+
+/** 次のレベルまでに必要な経験値 */
+export function xpToNext(level: number): number {
+  return 6 + (level - 1) * 4;
+}
+
+/** 階に到達したときのスコア */
+function depthScore(depth: number): number {
+  return depth * 20;
+}
 
 export interface GameState {
   version: typeof SAVE_VERSION;
@@ -49,6 +59,12 @@ export interface GameState {
   turn: number;
   nextId: number;
   kills: number;
+  level: number;
+  /** 今のレベルの中で貯めた経験値 */
+  xp: number;
+  score: number;
+  /** ハイスコアに記録済みか。リロードで二重に記録しないための印 */
+  recorded: boolean;
   map: GameMap;
   player: Actor;
   monsters: Actor[];
@@ -71,7 +87,10 @@ const MAP_W = 40;
 const MAP_H = 30;
 const FOV_RADIUS = 7;
 const LOG_MAX = 30;
-const REGEN_EVERY = 5;
+/** 階を降りたときの回復量。自然回復は無いので、回復手段はこれと回復薬とレベルアップだけ */
+const DESCEND_HEAL = 5;
+/** レベルアップで増える最大 HP (実 HP も同じだけ増える) */
+const LEVEL_HP = 3;
 
 export function newGame(seed: string): GameState {
   const rng = new Rng(hashSeed(seed));
@@ -83,6 +102,10 @@ export function newGame(seed: string): GameState {
     turn: 0,
     nextId: 1,
     kills: 0,
+    level: 1,
+    xp: 0,
+    score: 0,
+    recorded: false,
     map: { width: 0, height: 0, tiles: [], rooms: [] },
     player: createPlayer(0, 0),
     monsters: [],
@@ -139,7 +162,6 @@ export function step(state: GameState, action: Action): StepResult {
 
   monstersAct(state, rng);
   state.turn++;
-  if (state.turn % REGEN_EVERY === 0 && p.hp > 0 && p.hp < p.maxHp) p.hp++;
   updateFov(state);
 
   if (p.hp <= 0) {
@@ -164,11 +186,9 @@ function descend(state: GameState, rng: Rng): void {
   p.x = start.x;
   p.y = start.y;
 
-  if (state.depth > 1) {
-    p.maxHp += 2;
-    if (state.depth % 2 === 0) p.atk += 1;
-    p.hp = Math.min(p.maxHp, p.hp + 5);
-  }
+  // 階層そのものでは強くならない。伸びるのは経験値だけで、降りたときは少し回復する
+  if (state.depth > 1) p.hp = Math.min(p.maxHp, p.hp + DESCEND_HEAL);
+  state.score += depthScore(state.depth);
 
   state.monsters = spawnMonsters(rng, state.map, state.depth, start, () => state.nextId++);
   state.items = spawnItems(rng, state.map, state.depth, start, state.monsters);
@@ -229,15 +249,12 @@ function useItem(state: GameState, kind: ConsumableKind): void {
         return;
       }
       const dmg = 6 + state.depth * 2;
-      let killed = 0;
-      for (const m of targets) {
-        m.hp -= dmg;
-        if (m.hp <= 0) killed++;
-      }
+      for (const m of targets) m.hp -= dmg;
+      const dead = targets.filter((m) => m.hp <= 0);
       state.monsters = state.monsters.filter((m) => m.hp > 0);
-      state.kills += killed;
-      const tail = killed > 0 ? `${killed} 体を倒した。` : '';
+      const tail = dead.length > 0 ? `${dead.length} 体を倒した。` : '';
       pushLog(state, 'player', `雷が ${targets.length} 体に ${dmg} のダメージ。${tail}`);
+      for (const m of dead) rewardKill(state, m);
       return;
     }
     case 'map': {
@@ -281,8 +298,37 @@ function playerAttack(state: GameState, rng: Rng, target: Actor): void {
 
 function killMonster(state: GameState, m: Actor): void {
   state.monsters = state.monsters.filter((x) => x.id !== m.id);
-  state.kills++;
   pushLog(state, 'player', `${actorName(m.kind)}を倒した。`);
+  rewardKill(state, m);
+}
+
+/** 撃破数・スコア・経験値をまとめて加算する。雷で倒したときもここを通す */
+function rewardKill(state: GameState, m: Actor): void {
+  state.kills++;
+  const def = MONSTERS[m.kind as MonsterKind];
+  state.score += def.xp;
+  gainXp(state, def.xp);
+}
+
+/**
+ * 経験値を加算し、足りていればレベルを上げる。
+ * レベルアップで実 HP も増えるので、戦うこと自体が回復を兼ねる (自然回復が無いぶんの埋め合わせ)。
+ */
+function gainXp(state: GameState, amount: number): void {
+  const p = state.player;
+  state.xp += amount;
+  while (state.xp >= xpToNext(state.level)) {
+    state.xp -= xpToNext(state.level);
+    state.level++;
+    p.maxHp += LEVEL_HP;
+    p.hp += LEVEL_HP;
+    if (state.level % 2 === 0) {
+      p.atk += 1;
+      pushLog(state, 'player', `レベル ${state.level} になった。最大 HP と攻撃力が上がった。`);
+    } else {
+      pushLog(state, 'player', `レベル ${state.level} になった。最大 HP が上がった。`);
+    }
+  }
 }
 
 /**
@@ -519,11 +565,22 @@ export function toViewModel(state: GameState): ViewModel {
     cells,
     items,
     actors,
-    player: { x: p.x, y: p.y, hp: p.hp, maxHp: p.maxHp, atk: p.atk + state.weapon, def: state.armor },
+    player: {
+      x: p.x,
+      y: p.y,
+      hp: p.hp,
+      maxHp: p.maxHp,
+      atk: p.atk + state.weapon,
+      def: state.armor,
+      level: state.level,
+      xp: state.xp,
+      xpNext: xpToNext(state.level),
+    },
     inventory: CONSUMABLES.map((kind) => ({ kind, count: state.inventory[kind] })),
     depth: state.depth,
     turn: state.turn,
     kills: state.kills,
+    score: state.score,
     seed: state.seed,
     log: state.log,
     gameOver: state.over,

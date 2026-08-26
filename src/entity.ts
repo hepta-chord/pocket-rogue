@@ -45,6 +45,8 @@ export interface MonsterDef {
   name: string;
   hp: number;
   atk: number;
+  /** 倒したときの経験値。スコアの撃破点にも同じ値を使う */
+  xp: number;
   /** この階から出る */
   minDepth: number;
   /** この階を過ぎると出ない */
@@ -62,16 +64,17 @@ export interface MonsterDef {
 const ANY = 99;
 
 // 敵の定義表。新しい敵はここに 1 行足せば出る。
+// スライムの経験値が低いのは、分裂で 1 匹から何度も倒せるため (稼ぎ場にならないように抑えている)。
 export const MONSTERS: Record<MonsterKind, MonsterDef> = {
-  rat: { name: 'ネズミ', hp: 3, atk: 1, minDepth: 1, maxDepth: 4, weight: 5, maxPerFloor: ANY, pack: [2, 3], passives: [] },
-  bat: { name: 'コウモリ', hp: 4, atk: 2, minDepth: 1, maxDepth: 6, weight: 3, maxPerFloor: ANY, pack: [1, 1], passives: ['fast', 'erratic'] },
-  goblin: { name: 'ゴブリン', hp: 6, atk: 2, minDepth: 2, maxDepth: 8, weight: 4, maxPerFloor: ANY, pack: [1, 1], passives: [], action: { kind: 'doubleAttack', chance: 0.3 } },
-  slime: { name: 'スライム', hp: 8, atk: 2, minDepth: 3, maxDepth: 7, weight: 3, maxPerFloor: 2, pack: [1, 1], passives: ['split'] },
-  orc: { name: 'オーク', hp: 12, atk: 4, minDepth: 4, maxDepth: ANY, weight: 3, maxPerFloor: ANY, pack: [1, 1], passives: [] },
-  ghost: { name: '幽霊', hp: 8, atk: 3, minDepth: 5, maxDepth: ANY, weight: 2, maxPerFloor: ANY, pack: [1, 1], passives: ['phasing'] },
-  troll: { name: 'トロル', hp: 18, atk: 5, minDepth: 6, maxDepth: ANY, weight: 2, maxPerFloor: ANY, pack: [1, 1], passives: ['regen', 'slow'], action: { kind: 'smash', chance: 0.25 } },
-  wolf: { name: '狼', hp: 10, atk: 4, minDepth: 7, maxDepth: ANY, weight: 3, maxPerFloor: ANY, pack: [1, 1], passives: ['fast'], action: { kind: 'leap', chance: 0.4 } },
-  dragon: { name: 'ドラゴン', hp: 30, atk: 8, minDepth: 9, maxDepth: ANY, weight: 1, maxPerFloor: 1, pack: [1, 1], passives: [], action: { kind: 'breath', chance: 0.3 } },
+  rat: { name: 'ネズミ', hp: 3, atk: 1, xp: 1, minDepth: 1, maxDepth: 4, weight: 5, maxPerFloor: ANY, pack: [2, 3], passives: [] },
+  bat: { name: 'コウモリ', hp: 4, atk: 2, xp: 2, minDepth: 1, maxDepth: 6, weight: 3, maxPerFloor: ANY, pack: [1, 1], passives: ['fast', 'erratic'] },
+  goblin: { name: 'ゴブリン', hp: 6, atk: 2, xp: 4, minDepth: 2, maxDepth: 8, weight: 4, maxPerFloor: ANY, pack: [1, 1], passives: [], action: { kind: 'doubleAttack', chance: 0.3 } },
+  slime: { name: 'スライム', hp: 8, atk: 2, xp: 2, minDepth: 3, maxDepth: 7, weight: 3, maxPerFloor: 2, pack: [1, 1], passives: ['split'] },
+  orc: { name: 'オーク', hp: 12, atk: 4, xp: 9, minDepth: 4, maxDepth: ANY, weight: 3, maxPerFloor: ANY, pack: [1, 1], passives: [] },
+  ghost: { name: '幽霊', hp: 8, atk: 3, xp: 8, minDepth: 5, maxDepth: ANY, weight: 2, maxPerFloor: ANY, pack: [1, 1], passives: ['phasing'] },
+  troll: { name: 'トロル', hp: 18, atk: 5, xp: 16, minDepth: 6, maxDepth: ANY, weight: 2, maxPerFloor: ANY, pack: [1, 1], passives: ['regen', 'slow'], action: { kind: 'smash', chance: 0.25 } },
+  wolf: { name: '狼', hp: 10, atk: 4, xp: 11, minDepth: 7, maxDepth: ANY, weight: 3, maxPerFloor: ANY, pack: [1, 1], passives: ['fast'], action: { kind: 'leap', chance: 0.4 } },
+  dragon: { name: 'ドラゴン', hp: 30, atk: 8, xp: 40, minDepth: 9, maxDepth: ANY, weight: 1, maxPerFloor: 1, pack: [1, 1], passives: [], action: { kind: 'breath', chance: 0.3 } },
 };
 
 /** 分裂で増えるスライムの上限 (1 階あたり) */
