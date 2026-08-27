@@ -527,6 +527,11 @@ function updateFov(state: GameState): void {
   }
 }
 
+/** 外から 1 行足す (セーブを捨てた通知など、ゲームの外で起きたことを伝える) */
+export function addLog(state: GameState, kind: LogKind, text: string): void {
+  pushLog(state, kind, text);
+}
+
 function pushLog(state: GameState, kind: LogKind, text: string): void {
   state.log.push({ kind, text });
   if (state.log.length > LOG_MAX) state.log.splice(0, state.log.length - LOG_MAX);

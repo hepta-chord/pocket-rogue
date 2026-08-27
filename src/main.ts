@@ -1,5 +1,5 @@
 import './style.css';
-import { newGame, step, toViewModel, visibleMonsters, type Action, type GameState } from './game';
+import { addLog, newGame, step, toViewModel, visibleMonsters, type Action, type GameState } from './game';
 import { bestScore, loadScores, submitScore, today, type ScoreEntry } from './highscore';
 import { bindButtons, bindKeyboard, bindSlots } from './input';
 import type { Renderer } from './render/renderer';
@@ -24,7 +24,9 @@ const scores = byId<HTMLDialogElement>('scores');
 const seedInput = byId<HTMLInputElement>('seed-input');
 const slotButtons = Array.from(byId('slots').querySelectorAll<HTMLButtonElement>('[data-item]'));
 
-let state: GameState = loadGame() ?? newGame(randomSeedString());
+const loaded = loadGame();
+let state: GameState = loaded.state ?? newGame(randomSeedString());
+if (loaded.discarded) addLog(state, 'info', '前のセーブは形式が古いので読めなかった。新しく始める。');
 
 // ---------------------------------------------------------------------------
 // 描画
