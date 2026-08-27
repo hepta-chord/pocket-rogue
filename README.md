@@ -49,8 +49,26 @@ npm install
 npm run dev       # http://localhost:5173/
 npm run build     # dist/ に出力
 npm run preview   # dist/ を配信して確認
+npm test          # テスト
+npm run balance   # バランス計測 (既定 100 run)
 npm run icons     # public/icon-*.png を作り直す
 ```
+
+### バランス計測
+
+`npm run balance` は自動プレイを seed 違いで何度も回し、到達階の分布・階ごとの被弾・
+レベルあたりの撃破数を表にして出す。
+
+```sh
+npm run balance          # 100 run
+npm run balance -- 300   # run 数を指定する
+```
+
+seed は `SIM000` から順に振るので、同じ run 数なら何度回しても同じ結果になる。
+数値を変える前と後で同じコマンドを打ち、表を見比べるのが使い方である。
+
+自動プレイの方針は「隣の敵を殴る、危なくなったら飲む、近くのアイテムを拾う、階段へ向かう」の
+4 つだけで、最適プレイの再現は狙っていない。変更の前後を同じ条件で比べるための物差しである。
 
 ## 構成
 
@@ -65,6 +83,9 @@ src/
   rng.ts             シード付き乱数
   input.ts           キーボードと画面ボタンを同じ Action に揃える
   save.ts            localStorage の保存と復元
+  sim/               バランス計測 (本編のビルドには入らない)
+    autoplay.ts      ヘッドレスの自動プレイ
+    report.ts        結果を表に畳む
   render/
     renderer.ts      Renderer インターフェース
     text-renderer.ts Canvas に文字グリッドを描く
@@ -73,7 +94,12 @@ public/
   sw.js              オフライン用 Service Worker
   manifest.webmanifest
   icon-*.png
+scripts/
+  balance.ts         バランス計測の入口
+  make-icons.mjs     アイコン生成
 ```
+
+テストは `src/**/*.test.ts` に置く。
 
 見た目をタイル画像に替えたいときは、`Renderer` を実装した `TileRenderer` を `src/render/` に足し、
 `src/main.ts` で差し込む。`game.ts` と `view.ts` は `render/` を import しない。

@@ -8,6 +8,7 @@ import {
   spawnMonsters,
   type ActionKind,
   type Actor,
+  type ActorKind,
   type MonsterDef,
   type MonsterKind,
 } from './entity';
@@ -284,10 +285,40 @@ function revealMap(state: GameState): void {
 // ---------------------------------------------------------------------------
 // 戦闘
 
+/**
+ * ダメージが 1 回通るたびに呼ばれる計測用の通知。
+ * バランス調整の自動プレイ (src/sim) だけが使う。
+ *
+ * GameState に持たせるとセーブに載って形式が変わるので、モジュール変数に置いている。
+ * 本編では誰も登録しないので、常に null のまま何も起きない。
+ */
+export interface DamageEvent {
+  /** 誰が受けたか */
+  to: 'player' | 'monster';
+  depth: number;
+  /** 攻撃した側 */
+  from: ActorKind;
+  /** 軽減する前の出目 */
+  roll: number;
+  /** 実際に通ったダメージ */
+  dealt: number;
+}
+
+let damageObserver: ((e: DamageEvent) => void) | null = null;
+
+export function setDamageObserver(fn: ((e: DamageEvent) => void) | null): void {
+  damageObserver = fn;
+}
+
+function notifyDamage(e: DamageEvent): void {
+  damageObserver?.(e);
+}
+
 function playerAttack(state: GameState, rng: Rng, target: Actor): void {
   const p = state.player;
   const dmg = rng.int(1, p.atk + state.weapon);
   target.hp -= dmg;
+  notifyDamage({ to: 'monster', depth: state.depth, from: 'player', roll: dmg, dealt: dmg });
   pushLog(state, 'player', `${actorName(target.kind)}に ${dmg} のダメージ。`);
   if (target.hp <= 0) {
     killMonster(state, target);
@@ -342,6 +373,7 @@ function monsterAttack(state: GameState, rng: Rng, m: Actor, opts: { pierce?: bo
   const dmg = opts.pierce ? roll : Math.max(1, roll - state.armor);
   const reduced = roll - dmg;
   p.hp -= dmg;
+  notifyDamage({ to: 'player', depth: state.depth, from: m.kind, roll, dealt: dmg });
   const head = opts.label ?? `${actorName(m.kind)}から`;
   const note = reduced > 0 ? ` (防具で ${reduced} 軽減)` : '';
   pushLog(state, 'enemy', `${head} ${dmg} のダメージ。${note}`);
@@ -449,6 +481,7 @@ function tryAction(state: GameState, rng: Rng, m: Actor, kind: ActionKind, dist:
       const roll = Math.floor(m.atk / 2) + state.depth;
       const dmg = Math.max(1, roll - state.armor);
       p.hp -= dmg;
+      notifyDamage({ to: 'player', depth: state.depth, from: m.kind, roll, dealt: dmg });
       const note = roll - dmg > 0 ? ` (防具で ${roll - dmg} 軽減)` : '';
       pushLog(state, 'enemy', `${name}が炎を吐いた。${dmg} のダメージ。${note}`);
       return true;
