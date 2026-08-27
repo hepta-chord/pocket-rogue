@@ -22,16 +22,31 @@ export const CELL_GLYPHS: Record<CellKind, Glyph> = {
   floorBlue: { ch: '~', fg: '#7fc4ff' },
 };
 
+// 系統ごとに文字を固定し、グレードは色で示す。
+// 文字で「何系の敵か」、色で「どのくらい強いか」が読める。
 export const ACTOR_GLYPHS: Record<ActorKind, Glyph> = {
   player: { ch: '@', fg: '#f5f5f5' },
+
   rat: { ch: 'r', fg: '#c9a27a' },
-  bat: { ch: 'b', fg: '#b98cff' },
+  ratPoison: { ch: 'r', fg: '#b98cff' },
+  ratRot: { ch: 'r', fg: '#7fa06a' },
+
+  bat: { ch: 'b', fg: '#9a9ab8' },
+  batGale: { ch: 'b', fg: '#7fe0ff' },
+  batStorm: { ch: 'b', fg: '#ffe066' },
+
   goblin: { ch: 'g', fg: '#7fd17f' },
+  goblinArmored: { ch: 'g', fg: '#8fb8e6' },
+  goblinKing: { ch: 'g', fg: '#f0a83c' },
+
   slime: { ch: 's', fg: '#8fe3a0' },
-  orc: { ch: 'o', fg: '#f08c4a' },
-  ghost: { ch: 'G', fg: '#c8c8ff' },
+  slimeSplit: { ch: 's', fg: '#c8c8ff' },
+  slimeMimic: { ch: 's', fg: '#ff9bd8' },
+
   troll: { ch: 'T', fg: '#5aa9e6' },
-  wolf: { ch: 'w', fg: '#b8b8b8' },
+  trollRock: { ch: 'T', fg: '#b0a08a' },
+  trollIron: { ch: 'T', fg: '#d0d0d8' },
+
   dragon: { ch: 'D', fg: '#ff5c5c' },
 };
 
@@ -53,8 +68,12 @@ const HEALTH_MIX: Record<Health, { color: string; amount: number }> = {
   critical: { color: '#ff4d4d', amount: 0.75 },
 };
 
-/** 種類と HP の帯から、実際に描く文字と色を決める */
-export function actorGlyph(kind: ActorKind, health: Health): Glyph {
+/**
+ * 種類と HP の帯から、実際に描く文字と色を決める。
+ * 擬態している敵は、正体が割れるまで落ちている武器として描く。
+ */
+export function actorGlyph(kind: ActorKind, health: Health, disguised = false): Glyph {
+  if (disguised) return ITEM_GLYPHS.weapon;
   const base = ACTOR_GLYPHS[kind];
   // プレイヤーの色は変えない。自分の HP は HUD で見えているし、@ が赤くなると盤面が読みにくい
   if (kind === 'player') return base;

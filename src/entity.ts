@@ -2,7 +2,26 @@ import type { GameMap } from './map';
 import { Tile, idx, isWalkable } from './map';
 import type { Rng } from './rng';
 
-export type MonsterKind = 'rat' | 'bat' | 'goblin' | 'slime' | 'orc' | 'ghost' | 'troll' | 'wolf' | 'dragon';
+// 敵は 5 系統 × 3 グレード + ボスの 16 種。
+// グレードは種類ごとに階層を割り当てるのではなく、同じ系統の変種として変化させる。
+// 名前とグリフから系統と強さを推測できるように、系統ごとに base の生き物と文字を固定してある。
+export type MonsterKind =
+  | 'rat'
+  | 'ratPoison'
+  | 'ratRot'
+  | 'bat'
+  | 'batGale'
+  | 'batStorm'
+  | 'goblin'
+  | 'goblinArmored'
+  | 'goblinKing'
+  | 'slime'
+  | 'slimeSplit'
+  | 'slimeMimic'
+  | 'troll'
+  | 'trollRock'
+  | 'trollIron'
+  | 'dragon';
 export type ActorKind = 'player' | MonsterKind;
 
 export interface Actor {
@@ -17,6 +36,8 @@ export interface Actor {
   def: number;
   /** 回避率 0〜1。プレイヤーは防具の値を別に足す */
   evasion: number;
+  /** 擬態が解けたか。mimic を持つ敵だけが使う */
+  revealed?: boolean;
 }
 
 /**
@@ -27,8 +48,9 @@ export interface Actor {
  * - erratic: 追うとき半分の確率で狙いがそれる
  * - phasing: 壁の中を移動できる
  * - split: 近接攻撃を受けて生き残ると HP を半分にして 2 匹に割れる
+ * - mimic: 落ちている武器に化けている。隣に来るか殴られるまで動かず、武器として見える
  */
-export type Passive = 'fast' | 'slow' | 'regen' | 'erratic' | 'phasing' | 'split';
+export type Passive = 'fast' | 'slow' | 'regen' | 'erratic' | 'phasing' | 'split' | 'mimic';
 
 /**
  * アクション: 条件が揃ったとき確率で使う技。使わなかったら通常行動。
@@ -36,8 +58,10 @@ export type Passive = 'fast' | 'slow' | 'regen' | 'erratic' | 'phasing' | 'split
  * - smash: 隣接時、防具を無視した一撃
  * - leap: 距離 2 のとき、一気に隣接して攻撃
  * - breath: 距離 2〜4 で見えているとき、炎を吐く (攻撃力の半分 + 階数。防具で軽減)
+ * - poison: 隣接時、毒を与える (しばらく毎ターン HP が減る)
+ * - corrodeHit: 隣接時、装備を腐食させる
  */
-export type ActionKind = 'doubleAttack' | 'smash' | 'leap' | 'breath';
+export type ActionKind = 'doubleAttack' | 'smash' | 'leap' | 'breath' | 'poison' | 'corrodeHit';
 
 export interface MonsterAction {
   kind: ActionKind;
@@ -54,8 +78,7 @@ export interface MonsterAction {
  * - heavy 重装: 高 HP、鈍足、再生
  * - boss ボス: 階を代表する 1 体
  *
- * 今は分類を持たせるだけで、効果はまだ何にも繋がっていない。
- * 装備の系統特効とグレード変種が、この軸を参照して入る。
+ * 装備の系統特効がこの軸を参照する。
  */
 export type MonsterFamily = 'swarm' | 'swift' | 'warrior' | 'odd' | 'heavy' | 'boss';
 
@@ -71,6 +94,8 @@ export const FAMILY_NAMES: Record<MonsterFamily, string> = {
 export interface MonsterDef {
   name: string;
   family: MonsterFamily;
+  /** 1〜3。10 階ごとに次のグレードへ切り替わる。ボスは 0 */
+  grade: number;
   hp: number;
   atk: number;
   /** 防御力。プレイヤーの被弾計算と対称に効く */
@@ -86,7 +111,7 @@ export interface MonsterDef {
   minDepth: number;
   /** この階を過ぎると出ない */
   maxDepth: number;
-  /** 出現の重み */
+  /** 出現の重み。0 なら通常の配置では出ない */
   weight: number;
   /** 1 階に配置する上限 (分裂などで増えるぶんは含まない) */
   maxPerFloor: number;
@@ -98,21 +123,53 @@ export interface MonsterDef {
 
 const ANY = 99;
 
-// 敵の定義表。新しい敵はここに 1 行足せば出る。
-// スライムの経験値が低いのは、分裂で 1 匹から何度も倒せるため (稼ぎ場にならないように抑えている)。
+/** グレードが切り替わる間隔 (階) */
+export const GRADE_SPAN = 10;
+
+/** その階のグレード。31 階以降は 3 のまま据え置く */
+export function gradeAt(depth: number): number {
+  return Math.min(3, Math.floor((depth - 1) / GRADE_SPAN) + 1);
+}
+
+/**
+ * 敵の定義表。
+ *
+ * グレードの境目で数値が飛ばないように、次のグレードの基礎値は
+ * 前のグレードが最深部で持つ値 (createMonster の深さ補正込み) から続くように置いてある。
+ * 例: 群れのグレード 1 は B10 で HP 12 になるので、グレード 2 の基礎 HP は 14 にしてある。
+ *
+ * 系統ごとに文字と base の生き物を固定し、名前の修飾でグレードを示す。
+ */
 export const MONSTERS: Record<MonsterKind, MonsterDef> = {
-  rat: { name: 'ネズミ', family: 'swarm', hp: 3, atk: 1, def: 0, evasion: 0, xp: 1, minDepth: 1, maxDepth: 4, weight: 5, maxPerFloor: ANY, pack: [2, 3], passives: [] },
-  bat: { name: 'コウモリ', family: 'swift', hp: 4, atk: 2, def: 0, evasion: 0.1, xp: 2, minDepth: 1, maxDepth: 6, weight: 3, maxPerFloor: ANY, pack: [1, 1], passives: ['fast', 'erratic'] },
-  goblin: { name: 'ゴブリン', family: 'warrior', hp: 6, atk: 2, def: 1, evasion: 0, xp: 4, minDepth: 2, maxDepth: 8, weight: 4, maxPerFloor: ANY, pack: [1, 1], passives: [], action: { kind: 'doubleAttack', chance: 0.3 } },
-  slime: { name: 'スライム', family: 'odd', hp: 8, atk: 2, def: 1, evasion: 0, xp: 2, minDepth: 3, maxDepth: 7, weight: 3, maxPerFloor: 2, pack: [1, 1], passives: ['split'] },
-  orc: { name: 'オーク', family: 'warrior', hp: 12, atk: 4, def: 2, evasion: 0, xp: 9, minDepth: 4, maxDepth: ANY, weight: 3, maxPerFloor: ANY, pack: [1, 1], passives: [] },
-  ghost: { name: '幽霊', family: 'odd', hp: 8, atk: 3, def: 0, evasion: 0.05, xp: 8, minDepth: 5, maxDepth: ANY, weight: 2, maxPerFloor: ANY, pack: [1, 1], passives: ['phasing'] },
-  troll: { name: 'トロル', family: 'heavy', hp: 18, atk: 5, def: 3, evasion: 0, xp: 16, minDepth: 6, maxDepth: ANY, weight: 2, maxPerFloor: ANY, pack: [1, 1], passives: ['regen', 'slow'], action: { kind: 'smash', chance: 0.25 } },
-  wolf: { name: '狼', family: 'swift', hp: 10, atk: 4, def: 1, evasion: 0.1, xp: 11, minDepth: 7, maxDepth: ANY, weight: 3, maxPerFloor: ANY, pack: [1, 1], passives: ['fast'], action: { kind: 'leap', chance: 0.4 } },
-  dragon: { name: 'ドラゴン', family: 'boss', hp: 30, atk: 8, def: 3, evasion: 0, xp: 40, minDepth: 9, maxDepth: ANY, weight: 1, maxPerFloor: 1, pack: [1, 1], passives: [], action: { kind: 'breath', chance: 0.3 } },
+  // 群れ: 1 体は弱く数で押す。グレードが上がると付与攻撃を持つ
+  rat: { name: 'ネズミ', family: 'swarm', grade: 1, hp: 3, atk: 1, def: 0, evasion: 0, xp: 1, minDepth: 1, maxDepth: 10, weight: 5, maxPerFloor: ANY, pack: [2, 3], passives: [] },
+  ratPoison: { name: '毒ネズミ', family: 'swarm', grade: 2, hp: 14, atk: 4, def: 2, evasion: 0, xp: 8, minDepth: 11, maxDepth: 20, weight: 5, maxPerFloor: ANY, pack: [2, 4], passives: [], action: { kind: 'poison', chance: 0.35 } },
+  ratRot: { name: '腐れネズミ', family: 'swarm', grade: 3, hp: 26, atk: 7, def: 4, evasion: 0, xp: 24, minDepth: 21, maxDepth: ANY, weight: 5, maxPerFloor: ANY, pack: [3, 5], passives: [], action: { kind: 'corrodeHit', chance: 0.2 } },
+
+  // 俊敏: 速い、逃げられない。グレードが上がると跳躍が付く
+  bat: { name: 'コウモリ', family: 'swift', grade: 1, hp: 4, atk: 2, def: 0, evasion: 0.1, xp: 2, minDepth: 1, maxDepth: 10, weight: 3, maxPerFloor: ANY, pack: [1, 1], passives: ['fast', 'erratic'] },
+  batGale: { name: '疾風コウモリ', family: 'swift', grade: 2, hp: 15, atk: 5, def: 2, evasion: 0.12, xp: 10, minDepth: 11, maxDepth: 20, weight: 3, maxPerFloor: ANY, pack: [1, 2], passives: ['fast', 'erratic'], action: { kind: 'leap', chance: 0.4 } },
+  batStorm: { name: '雷コウモリ', family: 'swift', grade: 3, hp: 27, atk: 8, def: 4, evasion: 0.15, xp: 30, minDepth: 21, maxDepth: ANY, weight: 3, maxPerFloor: ANY, pack: [1, 2], passives: ['fast', 'erratic'], action: { kind: 'leap', chance: 0.5 } },
+
+  // 戦士: 素直に強い。装備を落とす率が高い系統
+  goblin: { name: 'ゴブリン', family: 'warrior', grade: 1, hp: 6, atk: 2, def: 1, evasion: 0, xp: 4, minDepth: 2, maxDepth: 10, weight: 4, maxPerFloor: ANY, pack: [1, 1], passives: [], action: { kind: 'doubleAttack', chance: 0.3 } },
+  goblinArmored: { name: '重装ゴブリン', family: 'warrior', grade: 2, hp: 17, atk: 5, def: 4, evasion: 0, xp: 14, minDepth: 11, maxDepth: 20, weight: 4, maxPerFloor: ANY, pack: [1, 1], passives: [], action: { kind: 'doubleAttack', chance: 0.4 } },
+  goblinKing: { name: 'ゴブリン王', family: 'warrior', grade: 3, hp: 29, atk: 8, def: 6, evasion: 0, xp: 40, minDepth: 21, maxDepth: ANY, weight: 4, maxPerFloor: ANY, pack: [1, 1], passives: [], action: { kind: 'doubleAttack', chance: 0.5 } },
+
+  // 変則: 通常の戦い方が通じない。分裂 → 壁抜け → 擬態と重なっていく
+  slime: { name: 'スライム', family: 'odd', grade: 1, hp: 8, atk: 2, def: 1, evasion: 0, xp: 2, minDepth: 3, maxDepth: 10, weight: 3, maxPerFloor: 2, pack: [1, 1], passives: ['split'] },
+  slimeSplit: { name: '幽体スライム', family: 'odd', grade: 2, hp: 18, atk: 5, def: 3, evasion: 0.05, xp: 8, minDepth: 11, maxDepth: 20, weight: 3, maxPerFloor: 2, pack: [1, 1], passives: ['split', 'phasing'] },
+  slimeMimic: { name: '擬態スライム', family: 'odd', grade: 3, hp: 30, atk: 8, def: 5, evasion: 0.05, xp: 22, minDepth: 21, maxDepth: ANY, weight: 3, maxPerFloor: 2, pack: [1, 1], passives: ['split', 'phasing', 'mimic'] },
+
+  // 重装: 高 HP、鈍足、再生。強打の発生率と再生量が上がっていく
+  troll: { name: 'トロル', family: 'heavy', grade: 1, hp: 18, atk: 5, def: 3, evasion: 0, xp: 16, minDepth: 6, maxDepth: 10, weight: 2, maxPerFloor: 2, pack: [1, 1], passives: ['regen', 'slow'], action: { kind: 'smash', chance: 0.25 } },
+  trollRock: { name: '岩トロル', family: 'heavy', grade: 2, hp: 24, atk: 6, def: 4, evasion: 0, xp: 34, minDepth: 11, maxDepth: 20, weight: 2, maxPerFloor: 2, pack: [1, 1], passives: ['regen', 'slow'], action: { kind: 'smash', chance: 0.35 } },
+  trollIron: { name: '鉄トロル', family: 'heavy', grade: 3, hp: 36, atk: 9, def: 6, evasion: 0, xp: 70, minDepth: 21, maxDepth: ANY, weight: 2, maxPerFloor: 2, pack: [1, 1], passives: ['regen', 'slow'], action: { kind: 'smash', chance: 0.45 } },
+
+  // ボス: 階を代表する 1 体
+  dragon: { name: 'ドラゴン', family: 'boss', grade: 0, hp: 30, atk: 8, def: 3, evasion: 0, xp: 40, minDepth: 9, maxDepth: ANY, weight: 1, maxPerFloor: 1, pack: [1, 1], passives: [], action: { kind: 'breath', chance: 0.3 } },
 };
 
-/** 分裂で増えるスライムの上限 (1 階あたり) */
 export const SLIME_CAP = 4;
 
 export function monsterDef(kind: ActorKind): MonsterDef | null {

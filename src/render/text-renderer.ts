@@ -127,7 +127,7 @@ export class TextRenderer implements Renderer {
       const sx = a.x - this.camX;
       const sy = a.y - this.camY;
       if (sx < 0 || sy < 0 || sx >= this.cols || sy >= this.rows) continue;
-      const g = actorGlyph(a.kind, a.health);
+      const g = actorGlyph(a.kind, a.health, a.disguised);
       ctx.fillStyle = COLORS.bg;
       ctx.fillRect(sx * cell, top + sy * cell, cell, cell);
       ctx.fillStyle = g.fg;

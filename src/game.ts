@@ -69,7 +69,12 @@ export type Action =
   | { type: 'cancel' };
 
 /** 残りターン数で切れる効果 */
-export type TimedEffect = 'haste' | 'slow';
+export type TimedEffect = 'haste' | 'slow' | 'poison';
+
+/** 毒が 1 ターンに与えるダメージ */
+const POISON_DAMAGE = 1;
+/** 毒を受けたときに乗る残りターン数 */
+const POISON_TURNS = 8;
 
 /** 魔法。コストはスタミナで払う */
 export type SpellKind = 'thunder';
@@ -741,9 +746,22 @@ function playerAttack(state: GameState, rng: Rng, target: Actor): void {
   }
 }
 
+/** 擬態中で、まだ正体が割れていないか */
+export function isDisguised(m: Actor): boolean {
+  return hasPassive(m.kind, 'mimic') && m.revealed !== true;
+}
+
+function reveal(state: GameState, m: Actor): void {
+  if (m.revealed) return;
+  m.revealed = true;
+  pushLog(state, 'alert', `武器だと思ったものが${actorName(m.kind)}だった。`);
+}
+
 /** プレイヤーから 1 体への 1 回ぶん */
 function strikeMonster(state: GameState, rng: Rng, target: Actor): void {
   const p = state.player;
+  // 殴れば正体は割れる
+  if (isDisguised(target)) reveal(state, target);
   const w = state.weapon;
   const name = actorName(target.kind);
 
@@ -939,6 +957,14 @@ function monsterTurn(state: GameState, rng: Rng, m: Actor, def: MonsterDef): boo
   const dist = Math.max(Math.abs(dx), Math.abs(dy));
   const sees = state.visible[idx(state.map, m.x, m.y)] === 1;
 
+  // 擬態: 武器のふりをして動かない。隣に来られた時点で正体を現し、その場で殴る
+  if (isDisguised(m)) {
+    if (dist > 1) return true;
+    reveal(state, m);
+    monsterAttack(state, rng, m);
+    return true;
+  }
+
   if (def.action && rng.chance(def.action.chance) && tryAction(state, rng, m, def.action.kind, dist, sees)) {
     return true;
   }
@@ -988,6 +1014,23 @@ function tryAction(state: GameState, rng: Rng, m: Actor, kind: ActionKind, dist:
       m.y = spot.y;
       pushLog(state, 'enemy', `${name}が跳びかかった。`);
       monsterAttack(state, rng, m);
+      return true;
+    }
+
+    case 'poison': {
+      if (dist !== 1) return false;
+      monsterAttack(state, rng, m, { label: `${name}の毒牙!` });
+      if (p.hp <= 0) return true;
+      state.effects.poison = (state.effects.poison ?? 0) + POISON_TURNS;
+      pushLog(state, 'alert', '毒が回った。しばらく HP が減り続ける。');
+      return true;
+    }
+
+    case 'corrodeHit': {
+      if (dist !== 1) return false;
+      monsterAttack(state, rng, m, { label: `${name}が噛みついた!` });
+      if (p.hp <= 0) return true;
+      corrode(state);
       return true;
     }
 
@@ -1080,14 +1123,23 @@ function updateFov(state: GameState): void {
   }
 }
 
+const EFFECT_END: Record<TimedEffect, string> = {
+  haste: '体の軽さが消えた。',
+  slow: '足の重さが取れた。',
+  poison: '毒が抜けた。',
+};
+
 /** 残りターン数つきの効果を 1 ターンぶん進める */
 function tickEffects(state: GameState): void {
-  for (const key of ['haste', 'slow'] as TimedEffect[]) {
+  if (state.effects.poison) {
+    state.player.hp -= POISON_DAMAGE;
+  }
+  for (const key of ['haste', 'slow', 'poison'] as TimedEffect[]) {
     const left = state.effects[key];
     if (left === undefined) continue;
     if (left <= 1) {
       delete state.effects[key];
-      pushLog(state, 'info', key === 'haste' ? '体の軽さが消えた。' : '足の重さが取れた。');
+      pushLog(state, 'info', EFFECT_END[key]);
     } else {
       state.effects[key] = left - 1;
     }
@@ -1207,9 +1259,10 @@ export function toViewModel(state: GameState): ViewModel {
     x: m.x,
     y: m.y,
     health: healthOf(m),
+    disguised: isDisguised(m),
   }));
   const p = state.player;
-  actors.push({ kind: 'player', x: p.x, y: p.y, health: healthOf(p) });
+  actors.push({ kind: 'player', x: p.x, y: p.y, health: healthOf(p), disguised: false });
 
   return {
     width: map.width,

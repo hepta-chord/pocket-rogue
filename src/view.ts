@@ -45,6 +45,8 @@ export interface ViewActor {
   x: number;
   y: number;
   health: Health;
+  /** 擬態中で正体が割れていない。描画層は武器として描く */
+  disguised: boolean;
 }
 
 export interface ViewItem {
