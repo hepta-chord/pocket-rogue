@@ -217,9 +217,9 @@ export class TextRenderer implements Renderer {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     const cy = height / 2;
-    ctx.fillStyle = COLORS.hpLow;
+    ctx.fillStyle = vm.cleared ? COLORS.warn : COLORS.hpLow;
     ctx.font = `bold ${Math.floor(cell * 1.2)}px ${FONT_STACK}`;
-    ctx.fillText('ゲームオーバー', width / 2, cy - cell * 2.4);
+    ctx.fillText(vm.cleared ? 'クリア' : 'ゲームオーバー', width / 2, cy - cell * 2.4);
     ctx.fillStyle = COLORS.hud;
     ctx.font = `bold ${Math.floor(cell * 1.6)}px ${FONT_STACK}`;
     ctx.fillText(`${vm.score}`, width / 2, cy - cell * 0.6);

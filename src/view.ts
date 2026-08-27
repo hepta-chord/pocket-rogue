@@ -11,6 +11,7 @@ export type CellKind =
   | 'wall'
   | 'floor'
   | 'stairs'
+  | 'stairsUp'
   | 'unknown'
   /** イベント床。色ごとに効果の大きさとマイナスの出る率が違う */
   | 'floorGreen'
@@ -113,4 +114,6 @@ export interface ViewModel {
   /** 確認待ち。null でなければ操作を止めて、この文面を出す */
   prompt: { text: string; confirm: string; cancel: string } | null;
   gameOver: boolean;
+  /** 脱出して終わったか。gameOver と同時に立つ */
+  cleared: boolean;
 }

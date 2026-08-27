@@ -1,4 +1,5 @@
 import {
+  BOSS,
   MONSTERS,
   SLIME_CAP,
   STALKER,
@@ -41,8 +42,10 @@ import {
   stackLimit,
   emptyInventory,
   isEquip,
+  isTreasure,
   itemLabel,
   makeEquipItem,
+  makeTreasure,
   pickDropEquip,
   pickFloorEquip,
   spawnItems,
@@ -120,6 +123,8 @@ export const SPELL_KINDS = Object.keys(SPELLS) as SpellKind[];
  */
 export type Prompt =
   | { kind: 'descend' }
+  /** 脱出階段。上ると冒険が終わる */
+  | { kind: 'escape' }
   /** 拾った装備を身に着けるか。断ると床に戻る */
   | { kind: 'equip'; item: Item };
 
@@ -184,6 +189,8 @@ export interface GameState {
   houseRoom: number;
   /** ハウスがまだ起動していないか */
   houseArmed: boolean;
+  /** 脱出して終わったか */
+  cleared: boolean;
   /** 持っている消耗品の数 */
   inventory: Inventory;
   /** 確認待ち。null なら通常の操作を受け付ける */
@@ -214,6 +221,13 @@ const DARK_FOV_RADIUS = 3;
 const LOG_MAX = 30;
 /** レベルアップで増える最大 HP */
 const LEVEL_HP = 3;
+
+/** ボスが出る階の間隔 */
+const BOSS_SPAN = 10;
+/** 倒すと脱出できる階の間隔 */
+const CLEAR_SPAN = 30;
+/** 脱出したときの加点 */
+const CLEAR_BONUS = 1000;
 
 /** スタミナの初期最大値。イベント床で増減する */
 const STAMINA_MAX = 100;
@@ -253,6 +267,7 @@ export function newGame(seed: string): GameState {
     dark: false,
     houseRoom: -1,
     houseArmed: false,
+    cleared: false,
     inventory: emptyInventory(),
     prompt: null,
     stamina: STAMINA_MAX,
@@ -326,10 +341,11 @@ export function step(state: GameState, action: Action): StepResult {
   //
   // 出すのは「踏み入れたとき」と「階段の上で待ったとき」だけにする。
   // その場で戦っている間も毎ターン出ると、確認が邪魔で戦えない。
-  const onStairs = tileAt(state.map, p.x, p.y) === Tile.StairsDown;
+  const tile = tileAt(state.map, p.x, p.y);
+  const onStairs = tile === Tile.StairsDown || tile === Tile.StairsUp;
   const asks = onStairs && (entered || action.type === 'wait');
   if (!state.over && !state.prompt && asks) {
-    state.prompt = { kind: 'descend' };
+    state.prompt = tile === Tile.StairsUp ? { kind: 'escape' } : { kind: 'descend' };
     interrupt = true;
   }
 
@@ -364,11 +380,23 @@ function answerPrompt(state: GameState, rng: Rng, action: Action): StepResult {
       endTurn(state, rng, { enemies: false });
       return { acted: true, interrupt: true };
 
+    case 'escape':
+      escape(state);
+      return { acted: true, interrupt: true };
+
     case 'equip':
       equipItem(state, prompt.item);
       // 持ち替えは足元での作業なので、ターンは消費させない
       return { acted: false, interrupt: true };
   }
+}
+
+/** 脱出してクリアする。run はここで終わる */
+function escape(state: GameState): void {
+  state.score += CLEAR_BONUS;
+  state.cleared = true;
+  state.over = true;
+  pushLog(state, 'alert', `地上に出た。B${state.depth} まで潜り、${state.kills} 体を倒した。`);
 }
 
 /**
@@ -418,6 +446,13 @@ export function promptText(state: GameState): { text: string; confirm: string; c
   switch (prompt.kind) {
     case 'descend':
       return { text: `B${state.depth + 1} に降りますか。`, confirm: '降りる', cancel: 'やめる' };
+
+    case 'escape':
+      return {
+        text: '地上へ脱出しますか。\nここで冒険は終わり、スコアが確定します。',
+        confirm: '脱出する',
+        cancel: 'まだ潜る',
+      };
 
     case 'equip': {
       const item = prompt.item;
@@ -492,11 +527,44 @@ function descend(state: GameState, rng: Rng): void {
   state.floorTurn = 0;
   state.stalkerCalled = false;
   placeHouse(state, rng);
+  placeBoss(state, rng);
   state.visible = new Array<number>(MAP_W * MAP_H).fill(0);
   state.explored = new Array<number>(MAP_W * MAP_H).fill(0);
   updateFov(state);
   pushLog(state, 'info', state.depth === 1 ? 'B1。> を探して下に降りよう。' : `B${state.depth} に降りた。`);
   for (const note of floorNotes(state)) pushLog(state, 'alert', note);
+}
+
+/** ボスが出る階。10 階ごと */
+export function isBossFloor(depth: number): boolean {
+  return depth % BOSS_SPAN === 0;
+}
+
+/** 倒すと脱出できる階。30 階ごと */
+export function isClearFloor(depth: number): boolean {
+  return depth % CLEAR_SPAN === 0;
+}
+
+/**
+ * ボスを置く。
+ *
+ * 下り階段は最初から出ているので、10F と 20F のボスは倒さなくてもよい。
+ * 避けて降りる選択肢を残し、報酬をスコアにすることで戦う判断に見返りを与える。
+ * 30 階ごとのクリア階だけは、倒さないと脱出階段が出ない。
+ */
+function placeBoss(state: GameState, rng: Rng): void {
+  if (!isBossFloor(state.depth)) return;
+  const start = state.map.start;
+  const m = placeMonster(
+    rng,
+    state.map,
+    BOSS,
+    state.depth,
+    state.monsters,
+    () => state.nextId++,
+    (x, y) => Math.max(Math.abs(x - start.x), Math.abs(y - start.y)) >= 8,
+  );
+  if (m) state.monsters.push(m);
 }
 
 /**
@@ -733,7 +801,15 @@ function pickUp(state: GameState): boolean {
     return true;
   }
 
-  const kind = item.kind;
+  // 財宝は持ち歩かない。拾った時点でスコアになる
+  if (isTreasure(item.kind)) {
+    state.score += item.power;
+    state.items.splice(i, 1);
+    pushLog(state, 'player', `${name} を手にした。${item.power} 点。`);
+    return true;
+  }
+
+  const kind = item.kind as ConsumableKind;
   const limit = stackLimit(kind);
   if (state.inventory[kind] >= limit) {
     pushLog(state, 'info', `${name} はもう持てない (${limit} 個まで)。`);
@@ -934,6 +1010,22 @@ function killMonster(state: GameState, rng: Rng, m: Actor): void {
   pushLog(state, 'player', `${actorName(m.kind)}を倒した。`);
   rewardKill(state, m);
   dropEquip(state, rng, m);
+  if (m.kind === BOSS) defeatBoss(state, m);
+}
+
+/**
+ * ボスを倒したとき。財宝を落とし、クリア階なら脱出階段を出す。
+ * 財宝はその場に落とす。倒した場所まで取りに行く手間も判断のうちにする。
+ */
+function defeatBoss(state: GameState, m: Actor): void {
+  const treasure = makeTreasure(state.depth, m.x, m.y);
+  state.items.push(treasure);
+  pushLog(state, 'alert', `${itemLabel(treasure)} が転がり出た。`);
+
+  if (!isClearFloor(state.depth)) return;
+  state.map.tiles[idx(state.map, m.x, m.y)] = Tile.StairsUp;
+  state.explored[idx(state.map, m.x, m.y)] = 1;
+  pushLog(state, 'alert', '地上へ続く階段が現れた。');
 }
 
 /**
@@ -1405,6 +1497,7 @@ const CELL_KIND: Record<Tile, CellKind> = {
   [Tile.Wall]: 'wall',
   [Tile.Floor]: 'floor',
   [Tile.StairsDown]: 'stairs',
+  [Tile.StairsUp]: 'stairsUp',
 };
 
 const FLOOR_CELL: Record<FloorTile['kind'], CellKind> = {
@@ -1481,6 +1574,7 @@ export function toViewModel(state: GameState): ViewModel {
     log: state.log,
     prompt: promptText(state),
     gameOver: state.over,
+    cleared: state.cleared,
   };
 }
 

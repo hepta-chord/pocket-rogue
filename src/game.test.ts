@@ -5,6 +5,8 @@ import {
   SPELLS,
   applyFloorEffect,
   canCast,
+  isBossFloor,
+  isClearFloor,
   isDisguised,
   newGame,
   step,
@@ -761,6 +763,117 @@ describe('毒', () => {
     const settled = s.player.hp;
     step(s, WAIT);
     expect(s.player.hp).toBeGreaterThanOrEqual(settled);
+  });
+});
+
+describe('フロアボスとクリア', () => {
+  it('ボスは 10 階ごと、クリア階は 30 階ごと', () => {
+    expect(isBossFloor(10)).toBe(true);
+    expect(isBossFloor(20)).toBe(true);
+    expect(isBossFloor(9)).toBe(false);
+    expect(isClearFloor(30)).toBe(true);
+    expect(isClearFloor(60)).toBe(true);
+    expect(isClearFloor(10)).toBe(false);
+  });
+
+  /** 指定した階まで一気に降ろす */
+  function toDepth(s: GameState, depth: number): void {
+    while (s.depth < depth) {
+      const stairs = s.map.tiles.indexOf(Tile.StairsDown);
+      s.player.x = stairs % s.map.width;
+      s.player.y = Math.floor(stairs / s.map.width);
+      s.prompt = { kind: 'descend' };
+      s.stamina = s.staminaMax;
+      s.player.hp = s.player.maxHp;
+      step(s, { type: 'confirm' });
+    }
+  }
+
+  it('ボス階にドラゴンが 1 体だけ出る', () => {
+    const s = newGame('BOSS1');
+    toDepth(s, 10);
+    expect(s.monsters.filter((m) => m.kind === 'dragon')).toHaveLength(1);
+  });
+
+  it('ボス階でない階にはドラゴンが出ない', () => {
+    for (const seed of ['BOSS2', 'BOSS3', 'BOSS4']) {
+      const s = newGame(seed);
+      toDepth(s, 9);
+      expect(s.monsters.some((m) => m.kind === 'dragon')).toBe(false);
+    }
+  });
+
+  it('ボスを倒すと財宝を落とす', () => {
+    const s = newGame('BOSS5');
+    toDepth(s, 10);
+    const boss = s.monsters.find((m) => m.kind === 'dragon');
+    if (!boss) return;
+    s.monsters = [boss];
+    boss.hp = 1;
+    boss.def = 0;
+    boss.evasion = 0;
+    boss.x = s.player.x + 1;
+    boss.y = s.player.y;
+    s.weapon = SURE_HIT;
+    step(s, { type: 'move', dx: 1, dy: 0 });
+    const treasure = s.items.find((it) => it.kind === 'treasure');
+    expect(treasure).toBeDefined();
+    expect(treasure?.power).toBeGreaterThan(0);
+  });
+
+  it('ボス階では下り階段が最初から出ている (倒さなくても降りられる)', () => {
+    const s = newGame('BOSS6');
+    toDepth(s, 10);
+    expect(s.map.tiles.filter((t) => t === Tile.StairsDown)).toHaveLength(1);
+    expect(s.map.tiles.some((t) => t === Tile.StairsUp)).toBe(false);
+  });
+
+  it('クリア階でボスを倒すと脱出階段が出る', () => {
+    const s = newGame('BOSS7');
+    toDepth(s, 30);
+    const boss = s.monsters.find((m) => m.kind === 'dragon');
+    if (!boss) return;
+    s.monsters = [boss];
+    boss.hp = 1;
+    boss.def = 0;
+    boss.evasion = 0;
+    boss.x = s.player.x + 1;
+    boss.y = s.player.y;
+    s.weapon = SURE_HIT;
+    step(s, { type: 'move', dx: 1, dy: 0 });
+    expect(s.map.tiles.filter((t) => t === Tile.StairsUp)).toHaveLength(1);
+  });
+
+  it('脱出すると加点されて終わる', () => {
+    const s = newGame('BOSS8');
+    s.prompt = { kind: 'escape' };
+    const before = s.score;
+    const r = step(s, { type: 'confirm' });
+    expect(r.acted).toBe(true);
+    expect(s.cleared).toBe(true);
+    expect(s.over).toBe(true);
+    expect(s.score).toBeGreaterThan(before);
+    expect(toViewModel(s).cleared).toBe(true);
+  });
+
+  it('脱出を断ればそのまま潜り続けられる', () => {
+    const s = newGame('BOSS9');
+    s.prompt = { kind: 'escape' };
+    step(s, { type: 'cancel' });
+    expect(s.over).toBe(false);
+    expect(s.cleared).toBe(false);
+  });
+
+  it('財宝は拾うとスコアになる', () => {
+    const s = newGame('TR1');
+    const spot = neighborOf(s, s.player);
+    if (!spot) return;
+    s.monsters = [];
+    s.items = [{ kind: 'treasure', power: 250, x: spot.x, y: spot.y }];
+    const before = s.score;
+    step(s, { type: 'move', dx: spot.x - s.player.x, dy: spot.y - s.player.y });
+    expect(s.score).toBe(before + 250);
+    expect(s.items).toHaveLength(0);
   });
 });
 

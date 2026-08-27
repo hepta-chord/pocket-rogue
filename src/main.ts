@@ -143,6 +143,7 @@ function startGame(seed: string): void {
 /** 死んだときに 1 回だけ呼ぶ。記録して結果を出す */
 function finishRun(): void {
   state.recorded = true;
+  byId('go-title').textContent = state.cleared ? 'クリア' : 'ゲームオーバー';
   const entry: ScoreEntry = {
     score: state.score,
     depth: state.depth,

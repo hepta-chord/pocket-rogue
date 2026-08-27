@@ -19,7 +19,9 @@ import type { Rng } from './rng';
 // 雷は魔法 (スタミナ消費) に、地図は床のイベント効果に移した。
 export type ConsumableKind = 'potion' | 'elixir';
 export type EquipKind = EquipSlot;
-export type ItemKind = ConsumableKind | EquipKind;
+/** 拾うとスコアになるだけの品。ボスが落とす */
+export type TreasureKind = 'treasure';
+export type ItemKind = ConsumableKind | EquipKind | TreasureKind;
 
 export const CONSUMABLES: readonly ConsumableKind[] = ['potion', 'elixir'];
 
@@ -47,6 +49,7 @@ export const ITEM_NAMES: Record<ItemKind, string> = {
   elixir: 'スタミナ薬',
   weapon: '武器',
   armor: '防具',
+  treasure: '財宝',
 };
 
 /**
@@ -64,8 +67,9 @@ export function stackLimit(kind: ConsumableKind): number {
 // 攻撃力がレベルで伸びなくなったぶん、武器の引きが勝敗に直結する。
 // 武器の重みを上げて、1 個あたりの重みを下げる。
 // 回復薬は 1 個あたりの量を下げたぶん、出る数を増やしてある。
-const WEIGHTS: Record<ItemKind, number> = { potion: 6, elixir: 4, weapon: 4, armor: 3 };
-const KINDS = Object.keys(WEIGHTS) as ItemKind[];
+// 財宝は床には出ない。ボスを倒したときだけ落ちる
+const WEIGHTS: Record<ItemKind, number> = { potion: 6, elixir: 4, weapon: 4, armor: 3, treasure: 0 };
+const KINDS = (Object.keys(WEIGHTS) as ItemKind[]).filter((k) => WEIGHTS[k] > 0);
 
 /** 敵を倒したときに装備を落とす確率 */
 export const DROP_CHANCE = 0.16;
@@ -81,9 +85,20 @@ export function isEquip(kind: ItemKind): kind is EquipKind {
   return kind === 'weapon' || kind === 'armor';
 }
 
+export function isTreasure(kind: ItemKind): kind is TreasureKind {
+  return kind === 'treasure';
+}
+
+/** ボスが落とす財宝。深いボスほど価値が上がる */
+export function makeTreasure(depth: number, x: number, y: number): Item {
+  return { kind: 'treasure', x, y, power: 150 * Math.max(1, Math.floor(depth / 10)) };
+}
+
 /** 表示する名前。装備は種類と強さを出す */
 export function itemLabel(item: Item): string {
-  return item.equip ? `${equipDef(item.equip).name} +${item.power}` : ITEM_NAMES[item.kind];
+  if (item.equip) return `${equipDef(item.equip).name} +${item.power}`;
+  if (isTreasure(item.kind)) return `${ITEM_NAMES.treasure} (${item.power} 点)`;
+  return ITEM_NAMES[item.kind];
 }
 
 /**

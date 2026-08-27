@@ -180,7 +180,7 @@ export const MONSTERS: Record<MonsterKind, MonsterDef> = {
   trollIron: { name: '鉄トロル', family: 'heavy', grade: 3, hp: 36, atk: 9, def: 6, evasion: 0, xp: 70, minDepth: 21, maxDepth: ANY, weight: 2, maxPerFloor: 2, pack: [1, 1], passives: ['regen', 'slow'], action: { kind: 'smash', chance: 0.45 } },
 
   // ボス: 階を代表する 1 体
-  dragon: { name: 'ドラゴン', family: 'boss', grade: 0, hp: 30, atk: 8, def: 3, evasion: 0, xp: 40, minDepth: 9, maxDepth: ANY, weight: 1, maxPerFloor: 1, pack: [1, 1], passives: [], action: { kind: 'breath', chance: 0.3 } },
+  dragon: { name: 'ドラゴン', family: 'boss', grade: 0, hp: 30, atk: 8, def: 3, evasion: 0, xp: 40, bounty: 120, minDepth: 10, maxDepth: ANY, weight: 0, maxPerFloor: 1, pack: [1, 1], passives: [], action: { kind: 'breath', chance: 0.3 } },
 
   // 長居への対策。通常の配置では出ず、フロア内のターン数で呼ばれる。
   // 勝てない強さだが、逃げ切れるように fast は付けない。
@@ -190,6 +190,9 @@ export const MONSTERS: Record<MonsterKind, MonsterDef> = {
 
 /** 長居への対策として呼ばれる敵 */
 export const STALKER: MonsterKind = 'stalker';
+
+/** フロアボス */
+export const BOSS: MonsterKind = 'dragon';
 
 export const SLIME_CAP = 4;
 

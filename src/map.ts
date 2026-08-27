@@ -4,6 +4,8 @@ export enum Tile {
   Wall = 0,
   Floor = 1,
   StairsDown = 2,
+  /** 脱出階段。クリア階でボスを倒すと現れる */
+  StairsUp = 3,
 }
 
 export interface Room {

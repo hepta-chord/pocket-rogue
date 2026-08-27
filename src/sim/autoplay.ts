@@ -184,6 +184,8 @@ function decide(state: GameState, policy: Policy): Action {
     if (state.prompt.kind === 'equip') {
       return isUpgrade(state, state.prompt.item) ? { type: 'confirm' } : { type: 'cancel' };
     }
+    // 脱出すると run がそこで終わって到達階の分布が測れないので、潜り続ける側を選ぶ
+    if (state.prompt.kind === 'escape') return { type: 'cancel' };
     return { type: 'confirm' };
   }
 

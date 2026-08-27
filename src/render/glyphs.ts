@@ -14,6 +14,7 @@ export const CELL_GLYPHS: Record<CellKind, Glyph> = {
   wall: { ch: '#', fg: '#8a8a96' },
   floor: { ch: '.', fg: '#5a5a66' },
   stairs: { ch: '>', fg: '#ffd166' },
+  stairsUp: { ch: '<', fg: '#8fe3ff' },
   unknown: { ch: ' ', fg: '#000000' },
   // イベント床。色で効果の大きさと危なさが読めるようにする
   floorGreen: { ch: '~', fg: '#7fd17f' },
@@ -58,6 +59,7 @@ export const ITEM_GLYPHS: Record<ItemKind, Glyph> = {
   elixir: { ch: '!', fg: '#7fe0ff' },
   weapon: { ch: ')', fg: '#d0d0d0' },
   armor: { ch: '[', fg: '#a0c4ff' },
+  treasure: { ch: '$', fg: '#ffd700' },
 };
 
 /**
