@@ -15,7 +15,7 @@ import {
   type DamageEvent,
   type GameState,
 } from '../game';
-import { Tile, idx, isWalkable, tileAt } from '../map';
+import { canStep, idx, isWalkable, Tile } from '../map';
 
 export interface Policy {
   /** HP がこの割合を下回ったら回復薬を飲む */
@@ -257,7 +257,9 @@ function bfsStep(state: GameState, targets: { x: number; y: number }[], limit: n
         if (nx < 0 || ny < 0 || nx >= map.width || ny >= map.height) continue;
         const ni = idx(map, nx, ny);
         if (dist[ni] !== -1) continue;
-        if (!isWalkable(map, nx, ny) || state.explored[ni] !== 1) continue;
+        if (state.explored[ni] !== 1) continue;
+        // 角の制限は左右対称なので、目的地から遡る向きで判定してよい
+        if (!canStep(map, cx, cy, dx, dy)) continue;
         dist[ni] = dist[i] + 1;
         queue.push(ni);
       }
@@ -274,6 +276,7 @@ function bfsStep(state: GameState, targets: { x: number; y: number }[], limit: n
       if (nx < 0 || ny < 0 || nx >= map.width || ny >= map.height) continue;
       const d = dist[idx(map, nx, ny)];
       if (d < 0 || d > limit) continue;
+      if (!canStep(map, p.x, p.y, dx, dy)) continue;
       if (state.monsters.some((m) => m.x === nx && m.y === ny)) continue;
       if (!best || d < best.d) best = { dx, dy, d };
     }
@@ -287,7 +290,7 @@ function randomStep(state: GameState): Action {
   for (let dy = -1; dy <= 1; dy++) {
     for (let dx = -1; dx <= 1; dx++) {
       if (dx === 0 && dy === 0) continue;
-      if (tileAt(state.map, p.x + dx, p.y + dy) !== Tile.Wall) return { type: 'move', dx, dy };
+      if (canStep(state.map, p.x, p.y, dx, dy)) return { type: 'move', dx, dy };
     }
   }
   return { type: 'wait' };

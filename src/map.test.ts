@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { Tile, generateMap, idx, isWalkable, roomCenter, type GameMap } from './map';
+import { Tile, canStep, generateMap, idx, roomCenter, type GameMap } from './map';
 import { Rng, hashSeed } from './rng';
 
 const W = 40;
@@ -9,7 +9,7 @@ function build(seed: string): GameMap {
   return generateMap(new Rng(hashSeed(seed)), W, H);
 }
 
-/** 開始地点から歩いて届くマスを塗る */
+/** 開始地点から歩いて届くマスを塗る。角の斜め移動の制限を守る */
 function reachable(map: GameMap, from: { x: number; y: number }): Set<number> {
   const seen = new Set<number>([idx(map, from.x, from.y)]);
   const queue = [from];
@@ -20,7 +20,7 @@ function reachable(map: GameMap, from: { x: number; y: number }): Set<number> {
         if (dx === 0 && dy === 0) continue;
         const nx = x + dx;
         const ny = y + dy;
-        if (!isWalkable(map, nx, ny)) continue;
+        if (!canStep(map, x, y, dx, dy)) continue;
         const i = idx(map, nx, ny);
         if (seen.has(i)) continue;
         seen.add(i);
@@ -30,6 +30,44 @@ function reachable(map: GameMap, from: { x: number; y: number }): Set<number> {
   }
   return seen;
 }
+
+describe('canStep', () => {
+  // . = 床、# = 壁 の 3x3 を作る
+  const grid = (rows: string[]): GameMap => ({
+    width: rows[0].length,
+    height: rows.length,
+    tiles: rows.flatMap((r) => [...r].map((c) => (c === '#' ? Tile.Wall : Tile.Floor))),
+    rooms: [],
+  });
+
+  it('直交の移動は制限しない', () => {
+    const map = grid(['#.#', '...', '#.#']);
+    expect(canStep(map, 1, 1, 0, -1)).toBe(true);
+    expect(canStep(map, 1, 1, 1, 0)).toBe(true);
+  });
+
+  it('壁には入れない', () => {
+    const map = grid(['###', '...', '###']);
+    expect(canStep(map, 1, 1, 0, -1)).toBe(false);
+  });
+
+  it('両隣が壁の斜めは通さない', () => {
+    const map = grid(['..#', '.@#', '##.']);
+    // (1,1) から右下 (2,2) へ。右 (2,1) と下 (1,2) がどちらも壁
+    expect(canStep(map, 1, 1, 1, 1)).toBe(false);
+  });
+
+  it('片方が空いていれば斜めに通れる', () => {
+    const map = grid(['...', '..#', '#..']);
+    // (1,1) から右下 (2,2) へ。右 (2,1) は壁だが下 (1,2) は床
+    expect(canStep(map, 1, 1, 1, 1)).toBe(true);
+  });
+
+  it('斜め先が壁なら両隣によらず通さない', () => {
+    const map = grid(['...', '...', '..#']);
+    expect(canStep(map, 1, 1, 1, 1)).toBe(false);
+  });
+});
 
 describe('generateMap', () => {
   const seeds = Array.from({ length: 60 }, (_, i) => `MAP${i}`);

@@ -24,7 +24,7 @@ import {
   type Inventory,
   type Item,
 } from './items';
-import { Tile, generateMap, idx, inBounds, isWalkable, roomCenter, tileAt, type GameMap } from './map';
+import { Tile, canStep, generateMap, idx, inBounds, isWalkable, roomCenter, tileAt, type GameMap } from './map';
 import { Rng, hashSeed } from './rng';
 import type { CellKind, Health, LogEntry, LogKind, ViewActor, ViewCell, ViewItem, ViewModel } from './view';
 
@@ -139,7 +139,7 @@ export function step(state: GameState, action: Action): StepResult {
     const target = monsterAt(state, nx, ny);
     if (target) {
       playerAttack(state, rng, target);
-    } else if (isWalkable(state.map, nx, ny)) {
+    } else if (canStep(state.map, p.x, p.y, action.dx, action.dy)) {
       p.x = nx;
       p.y = ny;
       interrupt = pickUp(state);
@@ -515,7 +515,9 @@ function moveToward(state: GameState, m: Actor, sx: number, sy: number): void {
     if (cx === 0 && cy === 0) continue;
     const nx = m.x + cx;
     const ny = m.y + cy;
-    if (!canEnter(state, nx, ny, phasing)) continue;
+    // 角の制限は敵にもかける。かけないと通路で敵だけが有利になり、逃げる選択肢が消える。
+    // 壁抜けだけは例外にする。壁の中を通れる相手に角の制限をかけると、その性質が意味を失う
+    if (!(phasing ? canEnter(state, nx, ny, true) : canStep(state.map, m.x, m.y, cx, cy))) continue;
     if (occupied(state, nx, ny)) continue;
     m.x = nx;
     m.y = ny;
@@ -528,7 +530,10 @@ function canEnter(state: GameState, x: number, y: number, phasing: boolean): boo
   return phasing ? inBounds(state.map, x, y) : isWalkable(state.map, x, y);
 }
 
-/** (x, y) の周囲 8 マスから入れる空きマスを 1 つ選ぶ。mover が近い順に試す */
+/**
+ * (x, y) の周囲 8 マスから入れる空きマスを 1 つ選ぶ。mover が近い順に試す。
+ * 跳びかかりと分裂で使う。技と分裂は通常の移動ではないので、角の制限はかけない。
+ */
 function freeNeighbor(
   state: GameState,
   x: number,
