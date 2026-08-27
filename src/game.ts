@@ -32,7 +32,18 @@ import type { CellKind, Health, LogEntry, LogKind, ViewActor, ViewCell, ViewItem
 export type Action =
   | { type: 'move'; dx: number; dy: number }
   | { type: 'wait' }
-  | { type: 'use'; item: ConsumableKind };
+  | { type: 'use'; item: ConsumableKind }
+  /** 確認プロンプトへの回答 */
+  | { type: 'confirm' }
+  | { type: 'cancel' };
+
+/**
+ * 確認待ちの状態。
+ *
+ * 汎用の器を 1 つだけ持ち、階段と装備の両方から使う。
+ * 確認が出ている間はゲームが止まり、confirm と cancel 以外の手を受け付けない。
+ */
+export type Prompt = { kind: 'descend' };
 
 export interface StepResult {
   /** ターンが進んだか。壁にぶつかった・持っていないアイテムを使おうとした、なら false */
@@ -41,7 +52,7 @@ export interface StepResult {
   interrupt: boolean;
 }
 
-export const SAVE_VERSION = 7;
+export const SAVE_VERSION = 8;
 
 /**
  * 次のレベルまでに必要な経験値。
@@ -83,6 +94,8 @@ export interface GameState {
   items: Item[];
   /** 持っている消耗品の数 */
   inventory: Inventory;
+  /** 確認待ち。null なら通常の操作を受け付ける */
+  prompt: Prompt | null;
   /** 装備の強さ。攻撃力と被ダメージ軽減に足す */
   weapon: number;
   armor: number;
@@ -122,6 +135,7 @@ export function newGame(seed: string): GameState {
     monsters: [],
     items: [],
     inventory: emptyInventory(),
+    prompt: null,
     weapon: 0,
     armor: 0,
     visible: [],
@@ -142,6 +156,13 @@ export function step(state: GameState, action: Action): StepResult {
   const rng = new Rng(state.rngState);
   const p = state.player;
   let interrupt = false;
+
+  if (state.prompt) {
+    const result = answerPrompt(state, rng, action);
+    state.rngState = rng.state;
+    return result;
+  }
+  if (action.type === 'confirm' || action.type === 'cancel') return none;
 
   if (action.type === 'move') {
     const nx = p.x + action.dx;
@@ -164,17 +185,51 @@ export function step(state: GameState, action: Action): StepResult {
     interrupt = true;
   }
 
-  if (tileAt(state.map, p.x, p.y) === Tile.StairsDown) {
-    descend(state, rng);
-    // 降りる瞬間は敵に行動させない。階段への直行を逃走手段として残すための非対称である
-    endTurn(state, rng, { enemies: false });
-    state.rngState = rng.state;
-    return { acted: true, interrupt: true };
+  endTurn(state, rng, { enemies: true });
+
+  // 階段は乗った瞬間ではなく、確認を挟んでから降りる。
+  // 長押しの連続移動で踏んだときに問答無用で降りてしまうのを防ぐ。
+  if (!state.over && tileAt(state.map, p.x, p.y) === Tile.StairsDown) {
+    state.prompt = { kind: 'descend' };
+    interrupt = true;
   }
 
-  endTurn(state, rng, { enemies: true });
   state.rngState = rng.state;
   return { acted: true, interrupt };
+}
+
+/**
+ * 確認待ちの回答を処理する。
+ * 取り消しはターンを消費しない。
+ */
+function answerPrompt(state: GameState, rng: Rng, action: Action): StepResult {
+  const prompt = state.prompt;
+  if (!prompt) return { acted: false, interrupt: false };
+
+  if (action.type === 'cancel') {
+    state.prompt = null;
+    return { acted: false, interrupt: true };
+  }
+  if (action.type !== 'confirm') return { acted: false, interrupt: false };
+
+  state.prompt = null;
+  switch (prompt.kind) {
+    case 'descend':
+      descend(state, rng);
+      // 降りる瞬間は敵に行動させない。階段への直行を逃走手段として残すための非対称である
+      endTurn(state, rng, { enemies: false });
+      return { acted: true, interrupt: true };
+  }
+}
+
+/** 確認の文面。描画層は文字を組み立てず、これをそのまま出す */
+export function promptText(state: GameState): { text: string; confirm: string; cancel: string } | null {
+  const prompt = state.prompt;
+  if (!prompt) return null;
+  switch (prompt.kind) {
+    case 'descend':
+      return { text: `B${state.depth + 1} に降りますか。`, confirm: '降りる', cancel: 'やめる' };
+  }
 }
 
 /**
@@ -671,6 +726,7 @@ export function toViewModel(state: GameState): ViewModel {
     score: state.score,
     seed: state.seed,
     log: state.log,
+    prompt: promptText(state),
     gameOver: state.over,
   };
 }

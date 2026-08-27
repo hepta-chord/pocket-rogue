@@ -21,6 +21,7 @@ const renderer: Renderer = new TextRenderer(canvas);
 const menu = byId<HTMLDialogElement>('menu');
 const gameover = byId<HTMLDialogElement>('gameover');
 const scores = byId<HTMLDialogElement>('scores');
+const confirm = byId<HTMLDialogElement>('confirm');
 const seedInput = byId<HTMLInputElement>('seed-input');
 const slotButtons = Array.from(byId('slots').querySelectorAll<HTMLButtonElement>('[data-item]'));
 
@@ -41,10 +42,26 @@ function renderSlots(vm: ViewModel): void {
   }
 }
 
+/**
+ * 確認プロンプトの表示を状態に合わせる。
+ * 文面はゲーム側が組み立てたものをそのまま出す。
+ */
+function renderPrompt(vm: ViewModel): void {
+  if (!vm.prompt) {
+    if (confirm.open) confirm.close();
+    return;
+  }
+  byId('confirm-text').textContent = vm.prompt.text;
+  byId('confirm-yes').textContent = vm.prompt.confirm;
+  byId('confirm-no').textContent = vm.prompt.cancel;
+  if (!confirm.open) confirm.showModal();
+}
+
 function render(): void {
   const vm = toViewModel(state);
   renderer.draw(vm);
   renderSlots(vm);
+  renderPrompt(vm);
 }
 
 let hitTimer: number | null = null;
@@ -214,13 +231,21 @@ byId('go-scores').addEventListener('click', () => {
   gameover.close();
   showScores();
 });
+byId('confirm-yes').addEventListener('click', () => act({ type: 'confirm' }));
+byId('confirm-no').addEventListener('click', () => act({ type: 'cancel' }));
+// Esc で閉じたときも取り消し扱いにする (プロンプトが残ったまま操作不能にならないようにする)
+confirm.addEventListener('cancel', (e) => {
+  e.preventDefault();
+  act({ type: 'cancel' });
+});
+
 byId('go-close').addEventListener('click', () => gameover.close());
 byId('scores-close').addEventListener('click', () => scores.close());
 
 // ---------------------------------------------------------------------------
 // 入力
 
-const dialogOpen = (): boolean => menu.open || gameover.open || scores.open;
+const dialogOpen = (): boolean => menu.open || gameover.open || scores.open || confirm.open;
 
 bindKeyboard(act, dialogOpen);
 bindButtons(byId('pad'), act);

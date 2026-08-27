@@ -190,6 +190,90 @@ describe('ログ', () => {
   });
 });
 
+describe('確認プロンプト', () => {
+  /** 階段の上まで歩かせる。着いたら true */
+  function walkToStairs(s: GameState): boolean {
+    const stairs = s.map.tiles.indexOf(Tile.StairsDown);
+    const sx = stairs % s.map.width;
+    const sy = Math.floor(stairs / s.map.width);
+    // 経路探索は要らない。テスト用に瞬間移動させて 1 歩だけ踏ませる
+    const from = neighborOf(s, { x: sx, y: sy });
+    if (!from) return false;
+    s.player.x = from.x;
+    s.player.y = from.y;
+    s.monsters = [];
+    step(s, { type: 'move', dx: sx - from.x, dy: sy - from.y });
+    return true;
+  }
+
+  it('階段に乗っても即座には降りない', () => {
+    const s = newGame('PROMPT1');
+    if (!walkToStairs(s)) return;
+    expect(s.prompt).toEqual({ kind: 'descend' });
+    expect(s.depth).toBe(1);
+  });
+
+  it('確認するとターンを消費して降りる', () => {
+    const s = newGame('PROMPT2');
+    if (!walkToStairs(s)) return;
+    const turnBefore = s.turn;
+    const r = step(s, { type: 'confirm' });
+    expect(r.acted).toBe(true);
+    expect(s.depth).toBe(2);
+    expect(s.prompt).toBeNull();
+    expect(s.turn).toBe(turnBefore + 1);
+  });
+
+  it('取り消すとターンを消費せず、その階に留まる', () => {
+    const s = newGame('PROMPT3');
+    if (!walkToStairs(s)) return;
+    const turnBefore = s.turn;
+    const r = step(s, { type: 'cancel' });
+    expect(r.acted).toBe(false);
+    expect(s.depth).toBe(1);
+    expect(s.prompt).toBeNull();
+    expect(s.turn).toBe(turnBefore);
+  });
+
+  it('確認待ちの間は移動も待機も受け付けない', () => {
+    const s = newGame('PROMPT4');
+    if (!walkToStairs(s)) return;
+    const before = { x: s.player.x, y: s.player.y, turn: s.turn };
+    expect(step(s, WAIT).acted).toBe(false);
+    expect(step(s, { type: 'move', dx: 1, dy: 0 }).acted).toBe(false);
+    expect(s.player.x).toBe(before.x);
+    expect(s.player.y).toBe(before.y);
+    expect(s.turn).toBe(before.turn);
+    expect(s.prompt).not.toBeNull();
+  });
+
+  it('取り消したあと、待機で確認をやり直せる', () => {
+    const s = newGame('PROMPT5');
+    if (!walkToStairs(s)) return;
+    step(s, { type: 'cancel' });
+    expect(s.prompt).toBeNull();
+    step(s, WAIT);
+    expect(s.prompt).toEqual({ kind: 'descend' });
+  });
+
+  it('確認が無いときの confirm と cancel は何も起こさない', () => {
+    const s = newGame('PROMPT6');
+    expect(step(s, { type: 'confirm' }).acted).toBe(false);
+    expect(step(s, { type: 'cancel' }).acted).toBe(false);
+    expect(s.turn).toBe(0);
+  });
+
+  it('ViewModel に文面が出る', () => {
+    const s = newGame('PROMPT7');
+    expect(toViewModel(s).prompt).toBeNull();
+    if (!walkToStairs(s)) return;
+    const vm = toViewModel(s);
+    expect(vm.prompt?.text).toContain('B2');
+    expect(vm.prompt?.confirm).toBeTruthy();
+    expect(vm.prompt?.cancel).toBeTruthy();
+  });
+});
+
 describe('toViewModel', () => {
   it('セルの数がマップの広さと一致する', () => {
     const s = newGame('VM1');

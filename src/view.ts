@@ -75,5 +75,7 @@ export interface ViewModel {
   seed: string;
   /** 古い順。描画層が末尾から必要な行数だけ使う */
   log: LogEntry[];
+  /** 確認待ち。null でなければ操作を止めて、この文面を出す */
+  prompt: { text: string; confirm: string; cancel: string } | null;
   gameOver: boolean;
 }

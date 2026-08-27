@@ -114,7 +114,7 @@ export function runOne(
       const action = decide(state, policy);
       const result = step(state, action);
       // 選んだ手が通らなかった (敵に塞がれた等) ときは、詰まらないように 1 マス適当に動く
-      if (!result.acted) step(state, randomStep(state));
+      if (!result.acted && !state.prompt) step(state, randomStep(state));
 
       // 撃破とレベルアップは、それが起きた階に付ける
       const r = row(here);
@@ -159,6 +159,9 @@ export function seedList(count: number, prefix = 'SIM'): string[] {
 // 方針
 
 function decide(state: GameState, policy: Policy): Action {
+  // 確認が出ていたら、まずそれに答える。自動プレイは常に進む側を選ぶ
+  if (state.prompt) return { type: 'confirm' };
+
   const p = state.player;
   const ratio = p.hp / p.maxHp;
   const seen = visibleMonsters(state);
