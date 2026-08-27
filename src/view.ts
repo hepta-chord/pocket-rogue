@@ -20,12 +20,21 @@ export type LogKind = 'player' | 'enemy' | 'info' | 'alert';
 export interface LogEntry {
   text: string;
   kind: LogKind;
+  /** この行が出たターン。描画層がターンの切れ目を見つけるのに使う */
+  turn: number;
 }
+
+/**
+ * HP の帯。実数ではなく意味だけを渡す。
+ * 閾値の判断をゲーム側に閉じ込め、描画層には「どう見せるか」だけを残すためである。
+ */
+export type Health = 'healthy' | 'hurt' | 'critical';
 
 export interface ViewActor {
   kind: ActorKind;
   x: number;
   y: number;
+  health: Health;
 }
 
 export interface ViewItem {

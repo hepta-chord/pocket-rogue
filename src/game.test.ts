@@ -101,6 +101,32 @@ describe('xpToNext', () => {
   });
 });
 
+describe('ログ', () => {
+  it('行にその時のターンが入る', () => {
+    const s = newGame('LOG1');
+    step(s, WAIT);
+    step(s, WAIT);
+    const turns = s.log.map((l) => l.turn);
+    expect(turns.every((t) => Number.isInteger(t) && t >= 0)).toBe(true);
+    // 古い行のターンが新しい行を追い越さない
+    expect([...turns].sort((a, b) => a - b)).toEqual(turns);
+  });
+
+  it('与ダメのログに敵の残り HP が出る', () => {
+    const s = newGame('LOG2');
+    const m = s.monsters[0];
+    const spot = neighborOf(s, s.player);
+    if (!spot) return;
+    m.x = spot.x;
+    m.y = spot.y;
+    m.hp = 999;
+    m.maxHp = 999;
+    step(s, { type: 'move', dx: m.x - s.player.x, dy: m.y - s.player.y });
+    const hit = s.log.find((l) => l.kind === 'player' && l.text.includes('のダメージ'));
+    expect(hit?.text).toMatch(/残り \d+/);
+  });
+});
+
 describe('toViewModel', () => {
   it('セルの数がマップの広さと一致する', () => {
     const s = newGame('VM1');
@@ -120,4 +146,36 @@ describe('toViewModel', () => {
     const shown = vm.actors.filter((a) => a.kind !== 'player').length;
     expect(shown).toBeLessThanOrEqual(s.monsters.length);
   });
+
+  it('HP の帯が残量に応じて変わる', () => {
+    const s = newGame('VM4');
+    const m = s.monsters[0];
+    const spot = neighborOf(s, s.player);
+    if (!spot) return;
+    m.x = spot.x;
+    m.y = spot.y;
+    m.maxHp = 20;
+
+    const bandAt = (hp: number): string | undefined => {
+      m.hp = hp;
+      return toViewModel(s).actors.find((a) => a.x === m.x && a.y === m.y)?.health;
+    };
+    expect(bandAt(20)).toBe('healthy');
+    expect(bandAt(11)).toBe('healthy');
+    expect(bandAt(10)).toBe('hurt');
+    expect(bandAt(6)).toBe('hurt');
+    expect(bandAt(5)).toBe('critical');
+    expect(bandAt(1)).toBe('critical');
+  });
 });
+
+/** プレイヤーの隣で歩けるマスを 1 つ返す */
+function neighborOf(s: GameState, p: { x: number; y: number }): { x: number; y: number } | null {
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      if (dx === 0 && dy === 0) continue;
+      if (isWalkable(s.map, p.x + dx, p.y + dy)) return { x: p.x + dx, y: p.y + dy };
+    }
+  }
+  return null;
+}

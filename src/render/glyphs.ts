@@ -1,6 +1,6 @@
 import type { ActorKind } from '../entity';
 import type { ItemKind } from '../items';
-import type { CellKind, LogKind } from '../view';
+import type { CellKind, Health, LogKind } from '../view';
 
 // 文字描画の見た目はこのファイルだけで決まる。
 // 種類 → 文字と色の対応表。ゲーム本体はここを知らない。
@@ -38,6 +38,39 @@ export const ITEM_GLYPHS: Record<ItemKind, Glyph> = {
   armor: { ch: '[', fg: '#a0c4ff' },
 };
 
+/**
+ * HP の帯を色に落とす。
+ * 傷ついた相手ほど赤に寄せることで、あと何発かをグリフだけで読めるようにする。
+ * 混ぜる比率であって塗り潰しではないので、敵の種類ごとの色は残る。
+ */
+const HEALTH_MIX: Record<Health, { color: string; amount: number }> = {
+  healthy: { color: '#ffffff', amount: 0 },
+  hurt: { color: '#ffb454', amount: 0.45 },
+  critical: { color: '#ff4d4d', amount: 0.75 },
+};
+
+/** 種類と HP の帯から、実際に描く文字と色を決める */
+export function actorGlyph(kind: ActorKind, health: Health): Glyph {
+  const base = ACTOR_GLYPHS[kind];
+  // プレイヤーの色は変えない。自分の HP は HUD で見えているし、@ が赤くなると盤面が読みにくい
+  if (kind === 'player') return base;
+  const { color, amount } = HEALTH_MIX[health];
+  return amount === 0 ? base : { ch: base.ch, fg: mix(base.fg, color, amount) };
+}
+
+/** #rrggbb を t の比率で混ぜる */
+function mix(from: string, to: string, t: number): string {
+  const a = parseHex(from);
+  const b = parseHex(to);
+  const c = a.map((v, i) => Math.round(v + (b[i] - v) * t));
+  return `#${c.map((v) => v.toString(16).padStart(2, '0')).join('')}`;
+}
+
+function parseHex(hex: string): [number, number, number] {
+  const n = parseInt(hex.slice(1), 16);
+  return [(n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff];
+}
+
 export const COLORS = {
   bg: '#101014',
   hud: '#d0d0d8',
@@ -54,7 +87,7 @@ export const LOG_COLORS: Record<LogKind, string> = {
   alert: '#ffd166',
 };
 
-/** 最新行以外のログの明るさ */
+/** 最新ターン以外のログの明るさ */
 export const LOG_OLD_ALPHA = 0.55;
 
 /** 見えていないが記憶している場所の明るさ */

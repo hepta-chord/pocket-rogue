@@ -47,6 +47,19 @@ function render(): void {
   renderSlots(vm);
 }
 
+let hitTimer: number | null = null;
+
+/** 被弾を画面全体の短い赤で知らせる */
+function flashHit(): void {
+  const app = byId('app');
+  app.classList.remove('hit');
+  // クラスを外して付け直すだけでは同じアニメーションが再生されないので、レイアウトを 1 回読む
+  void app.offsetWidth;
+  app.classList.add('hit');
+  if (hitTimer !== null) window.clearTimeout(hitTimer);
+  hitTimer = window.setTimeout(() => app.classList.remove('hit'), 200);
+}
+
 // ---------------------------------------------------------------------------
 // 進行
 
@@ -58,6 +71,7 @@ function render(): void {
 function act(action: Action): boolean {
   const hpBefore = state.player.hp;
   const result = step(state, action);
+  if (state.player.hp < hpBefore) flashHit();
   if (state.over && !state.recorded) finishRun();
   saveGame(state);
   render();

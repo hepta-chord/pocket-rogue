@@ -1,6 +1,5 @@
 import type { ViewModel } from '../view';
 import {
-  ACTOR_GLYPHS,
   CELL_GLYPHS,
   COLORS,
   FONT_STACK,
@@ -8,6 +7,7 @@ import {
   LOG_COLORS,
   LOG_OLD_ALPHA,
   REMEMBERED_ALPHA,
+  actorGlyph,
 } from './glyphs';
 import type { Renderer } from './renderer';
 
@@ -127,7 +127,7 @@ export class TextRenderer implements Renderer {
       const sx = a.x - this.camX;
       const sy = a.y - this.camY;
       if (sx < 0 || sy < 0 || sx >= this.cols || sy >= this.rows) continue;
-      const g = ACTOR_GLYPHS[a.kind];
+      const g = actorGlyph(a.kind, a.health);
       ctx.fillStyle = COLORS.bg;
       ctx.fillRect(sx * cell, top + sy * cell, cell, cell);
       ctx.fillStyle = g.fg;
@@ -181,6 +181,13 @@ export class TextRenderer implements Renderer {
     }
   }
 
+  /**
+   * ログを描く。
+   *
+   * 見えるのは 3 行しかないので、ターンの切れ目に区切り線を入れると情報が 2 行に減る。
+   * 代わりに減光の単位を行からターンに変え、最新ターンの行だけを明るくする。
+   * 行数を使わずに「どこまでが今の 1 手の結果か」が読める。
+   */
   private drawLog(vm: ViewModel, height: number): void {
     const { ctx, cell } = this;
     const size = Math.floor(cell * 0.6);
@@ -188,10 +195,10 @@ export class TextRenderer implements Renderer {
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     const lines = vm.log.slice(-LOG_ROWS);
+    const latest = lines.length > 0 ? lines[lines.length - 1].turn : 0;
     const base = height - LOG_ROWS * cell;
     for (let i = 0; i < lines.length; i++) {
-      const isLast = i === lines.length - 1;
-      ctx.globalAlpha = isLast ? 1 : LOG_OLD_ALPHA;
+      ctx.globalAlpha = lines[i].turn === latest ? 1 : LOG_OLD_ALPHA;
       ctx.fillStyle = LOG_COLORS[lines[i].kind];
       ctx.fillText(lines[i].text, 6, base + i * cell + cell / 2);
     }

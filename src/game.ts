@@ -26,7 +26,7 @@ import {
 } from './items';
 import { Tile, generateMap, idx, inBounds, isWalkable, roomCenter, tileAt, type GameMap } from './map';
 import { Rng, hashSeed } from './rng';
-import type { CellKind, LogEntry, LogKind, ViewActor, ViewCell, ViewItem, ViewModel } from './view';
+import type { CellKind, Health, LogEntry, LogKind, ViewActor, ViewCell, ViewItem, ViewModel } from './view';
 
 export type Action =
   | { type: 'move'; dx: number; dy: number }
@@ -40,7 +40,7 @@ export interface StepResult {
   interrupt: boolean;
 }
 
-export const SAVE_VERSION = 4;
+export const SAVE_VERSION = 5;
 
 /** 次のレベルまでに必要な経験値 */
 export function xpToNext(level: number): number {
@@ -332,7 +332,9 @@ function playerAttack(state: GameState, rng: Rng, target: Actor): void {
   const dmg = rng.int(1, p.atk + state.weapon);
   target.hp -= dmg;
   notifyDamage({ to: 'monster', depth: state.depth, from: 'player', roll: dmg, dealt: dmg });
-  pushLog(state, 'player', `${actorName(target.kind)}に ${dmg} のダメージ。`);
+  // 残り HP を出す。何発で倒せるかが読めないと、効いている感覚が出ない
+  const rest = target.hp > 0 ? ` (残り ${target.hp})` : '';
+  pushLog(state, 'player', `${actorName(target.kind)}に ${dmg} のダメージ${rest}。`);
   if (target.hp <= 0) {
     killMonster(state, target);
     return;
@@ -579,8 +581,15 @@ export function addLog(state: GameState, kind: LogKind, text: string): void {
 }
 
 function pushLog(state: GameState, kind: LogKind, text: string): void {
-  state.log.push({ kind, text });
+  state.log.push({ kind, text, turn: state.turn });
   if (state.log.length > LOG_MAX) state.log.splice(0, state.log.length - LOG_MAX);
+}
+
+/** HP の帯。半分より上は無傷扱い、1/4 以下を瀕死とする */
+function healthOf(a: Actor): Health {
+  if (a.hp > a.maxHp / 2) return 'healthy';
+  if (a.hp > a.maxHp / 4) return 'hurt';
+  return 'critical';
 }
 
 const CELL_KIND: Record<Tile, CellKind> = {
@@ -606,9 +615,14 @@ export function toViewModel(state: GameState): ViewModel {
     .filter((it) => state.explored[idx(map, it.x, it.y)] === 1)
     .map((it) => ({ kind: it.kind, x: it.x, y: it.y }));
 
-  const actors: ViewActor[] = visibleMonsters(state).map((m) => ({ kind: m.kind, x: m.x, y: m.y }));
+  const actors: ViewActor[] = visibleMonsters(state).map((m) => ({
+    kind: m.kind,
+    x: m.x,
+    y: m.y,
+    health: healthOf(m),
+  }));
   const p = state.player;
-  actors.push({ kind: 'player', x: p.x, y: p.y });
+  actors.push({ kind: 'player', x: p.x, y: p.y, health: healthOf(p) });
 
   return {
     width: map.width,

@@ -37,6 +37,32 @@ body {
   touch-action: none;
 }
 
+/* 被弾したときに画面を短く赤く光らせる。ログを読まなくても被弾が分かるようにする */
+#app.hit::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background: #ff3b3b;
+  opacity: 0;
+  pointer-events: none;
+  animation: hit-flash 180ms ease-out;
+}
+
+@keyframes hit-flash {
+  from {
+    opacity: 0.34;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #app.hit::after {
+    animation: none;
+  }
+}
+
 #controls {
   display: flex;
   flex-direction: column;
