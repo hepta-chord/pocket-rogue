@@ -4,6 +4,7 @@
 // これにより TextRenderer を TileRenderer に差し替えてもゲーム本体は変わらない。
 
 import type { ActorKind } from './entity';
+import type { SpellKind } from './game';
 import type { ConsumableKind, ItemKind } from './items';
 
 export type CellKind = 'wall' | 'floor' | 'stairs' | 'unknown';
@@ -43,6 +44,17 @@ export interface ViewItem {
   y: number;
 }
 
+/** スロットが指す先。描画層はこれをそのまま Action に変える */
+export type SlotRef = { kind: 'item'; id: ConsumableKind } | { kind: 'spell'; id: SpellKind };
+
+export interface ViewSlot {
+  ref: SlotRef;
+  label: string;
+  /** 消耗品なら残数、魔法ならコスト */
+  badge: string;
+  enabled: boolean;
+}
+
 export interface ViewModel {
   width: number;
   height: number;
@@ -69,9 +81,14 @@ export interface ViewModel {
     xp: number;
     /** 次のレベルまでに必要な経験値 */
     xpNext: number;
+    /** スタミナ。行動と被弾で減り、尽きると HP が削れる */
+    stamina: number;
+    staminaMax: number;
   };
   /** スロット表示用。CONSUMABLES の順 */
   inventory: { kind: ConsumableKind; count: number }[];
+  /** 画面下のスロット。消耗品と魔法が同じ並びに入る */
+  slots: ViewSlot[];
   depth: number;
   turn: number;
   kills: number;

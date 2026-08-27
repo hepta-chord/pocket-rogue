@@ -109,17 +109,25 @@ body {
   color: #ff8ad8;
 }
 
-#slots .glyph.thunder {
-  color: #ffe066;
-}
-
-#slots .glyph.map {
+#slots .glyph.elixir {
   color: #7fe0ff;
 }
 
-#slots .count::before {
+#slots .glyph.spell {
+  color: #ffe066;
+}
+
+/* 消耗品は所持数、魔法はスタミナのコストを出す */
+#slots .badge.count::before {
   content: '×';
   opacity: 0.6;
+}
+
+#slots .badge.cost::after {
+  content: 'ST';
+  opacity: 0.6;
+  font-size: 0.8em;
+  margin-left: 1px;
 }
 
 #pad {

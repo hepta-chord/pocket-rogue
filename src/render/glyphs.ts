@@ -32,8 +32,7 @@ export const ACTOR_GLYPHS: Record<ActorKind, Glyph> = {
 
 export const ITEM_GLYPHS: Record<ItemKind, Glyph> = {
   potion: { ch: '!', fg: '#ff8ad8' },
-  thunder: { ch: '?', fg: '#ffe066' },
-  map: { ch: '?', fg: '#7fe0ff' },
+  elixir: { ch: '!', fg: '#7fe0ff' },
   weapon: { ch: ')', fg: '#d0d0d0' },
   armor: { ch: '[', fg: '#a0c4ff' },
 };
@@ -76,6 +75,7 @@ export const COLORS = {
   hud: '#d0d0d8',
   hudDim: '#8a8a96',
   hpLow: '#ff6b6b',
+  warn: '#ffd166',
   overlay: 'rgba(16, 16, 20, 0.85)',
 };
 

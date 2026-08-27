@@ -7,6 +7,7 @@
 // GameState と step() が DOM を触らないので、そのまま Node で回せる。
 
 import {
+  canCast,
   newGame,
   setDamageObserver,
   step,
@@ -23,19 +24,21 @@ import {
   weaponAtk,
   type Equipped,
 } from '../equip';
-import { STACK_MAX, isEquip, type Item } from '../items';
+import { isEquip, stackLimit, type ConsumableKind, type Item } from '../items';
 import { canStep, idx, isWalkable, Tile } from '../map';
 
 export interface Policy {
   /** HP がこの割合を下回ったら回復薬を飲む */
   potionAt: number;
-  /** 見えている敵がこの数以上で、かつ HP が半分以下なら雷を読む */
+  /** 見えている敵がこの数以上で、かつ HP が半分以下なら雷を唱える */
   thunderAt: number;
+  /** スタミナがこの割合を下回ったらスタミナ薬を飲む */
+  elixirAt: number;
   /** この歩数以内に見えているアイテムがあれば、階段より先に取りにいく */
   itemRange: number;
 }
 
-export const DEFAULT_POLICY: Policy = { potionAt: 0.45, thunderAt: 3, itemRange: 14 };
+export const DEFAULT_POLICY: Policy = { potionAt: 0.45, thunderAt: 3, elixirAt: 0.25, itemRange: 14 };
 
 export interface RunLimits {
   /** 1 つの run で進める上限 */
@@ -180,8 +183,14 @@ function decide(state: GameState, policy: Policy): Action {
   const seen = visibleMonsters(state);
 
   if (ratio <= policy.potionAt && state.inventory.potion > 0) return { type: 'use', item: 'potion' };
-  if (seen.length >= policy.thunderAt && ratio <= 0.5 && state.inventory.thunder > 0) {
-    return { type: 'use', item: 'thunder' };
+  if (
+    state.stamina <= state.staminaMax * policy.elixirAt &&
+    state.inventory.elixir > 0
+  ) {
+    return { type: 'use', item: 'elixir' };
+  }
+  if (seen.length >= policy.thunderAt && ratio <= 0.5 && canCast(state, 'thunder')) {
+    return { type: 'cast', spell: 'thunder' };
   }
 
   const adjacent = seen.find((m) => Math.max(Math.abs(m.x - p.x), Math.abs(m.y - p.y)) === 1);
@@ -215,7 +224,7 @@ function nearestItemStep(state: GameState, range: number): Action | null {
  */
 function canTake(state: GameState, item: Item): boolean {
   if (isEquip(item.kind)) return isUpgrade(state, item);
-  return state.inventory[item.kind] < STACK_MAX;
+  return state.inventory[item.kind as ConsumableKind] < stackLimit(item.kind as ConsumableKind);
 }
 
 /**

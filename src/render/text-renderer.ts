@@ -140,13 +140,14 @@ export class TextRenderer implements Renderer {
     const size = Math.floor(cell * 0.55);
     ctx.font = `${size}px ${FONT_STACK}`;
     ctx.textBaseline = 'middle';
-    const { hp, maxHp, atk, def, level, xp, xpNext } = vm.player;
+    const { hp, maxHp, atk, def, level, xp, xpNext, stamina, staminaMax } = vm.player;
 
     this.drawSegments(
       [
         { text: `B${vm.depth}`, color: COLORS.hud },
         { text: `LV${level}`, color: COLORS.hud },
         { text: `HP ${hp}/${maxHp}`, color: hp <= maxHp * 0.3 ? COLORS.hpLow : COLORS.hud },
+        { text: `XP ${xp}/${xpNext}`, color: COLORS.hudDim },
       ],
       cell * 0.5,
       size,
@@ -155,7 +156,11 @@ export class TextRenderer implements Renderer {
       [
         { text: `ATK ${atk}`, color: COLORS.hudDim },
         { text: `DEF ${def}`, color: COLORS.hudDim },
-        { text: `XP ${xp}/${xpNext}`, color: COLORS.hudDim },
+        // スタミナは尽きると HP が減り始めるので、残り少ないうちから目立たせる
+        {
+          text: `ST ${stamina}/${staminaMax}`,
+          color: stamina === 0 ? COLORS.hpLow : stamina <= staminaMax * 0.25 ? COLORS.warn : COLORS.hudDim,
+        },
       ],
       cell * 1.5,
       size,

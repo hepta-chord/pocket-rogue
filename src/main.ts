@@ -1,7 +1,7 @@
 import './style.css';
 import { addLog, newGame, step, toViewModel, visibleMonsters, type Action, type GameState } from './game';
 import { bestScore, loadScores, submitScore, today, type ScoreEntry } from './highscore';
-import { bindButtons, bindKeyboard, bindSlots } from './input';
+import { bindButtons, bindKeyboard } from './input';
 import type { Renderer } from './render/renderer';
 import { TextRenderer } from './render/text-renderer';
 import { normalizeSeed, randomSeedString } from './rng';
@@ -23,7 +23,6 @@ const gameover = byId<HTMLDialogElement>('gameover');
 const scores = byId<HTMLDialogElement>('scores');
 const confirm = byId<HTMLDialogElement>('confirm');
 const seedInput = byId<HTMLInputElement>('seed-input');
-const slotButtons = Array.from(byId('slots').querySelectorAll<HTMLButtonElement>('[data-item]'));
 
 const loaded = loadGame();
 let state: GameState = loaded.state ?? newGame(randomSeedString());
@@ -32,14 +31,48 @@ if (loaded.discarded) addLog(state, 'info', '前のセーブは形式が古い�
 // ---------------------------------------------------------------------------
 // 描画
 
+/**
+ * 画面下のスロットを ViewModel から組み立てる。
+ * 何を並べるかはゲーム側が決めるので、消耗品が魔法に置き換わっても HTML は触らない。
+ */
 function renderSlots(vm: ViewModel): void {
-  for (const btn of slotButtons) {
-    const entry = vm.inventory.find((e) => e.kind === btn.dataset.item);
-    const count = entry?.count ?? 0;
-    const countEl = btn.querySelector('.count');
-    if (countEl) countEl.textContent = String(count);
-    btn.disabled = count === 0 || vm.gameOver;
+  const root = byId('slots');
+  // 並びが変わったときだけ作り直し、ふだんは中身の更新で済ませる
+  const signature = vm.slots.map((s) => `${s.ref.kind}:${s.ref.id}`).join(',');
+  if (root.dataset.signature !== signature) {
+    root.innerHTML = '';
+    root.dataset.signature = signature;
+    for (const slot of vm.slots) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.append(
+        span('glyph ' + (slot.ref.kind === 'spell' ? 'spell' : slot.ref.id), slot.ref.kind === 'spell' ? '*' : '!'),
+        span('name', slot.label),
+        span('badge ' + (slot.ref.kind === 'spell' ? 'cost' : 'count'), slot.badge),
+      );
+      btn.addEventListener('click', () => {
+        act(slot.ref.kind === 'item' ? { type: 'use', item: slot.ref.id } : { type: 'cast', spell: slot.ref.id });
+      });
+      root.append(btn);
+    }
   }
+
+  const buttons = Array.from(root.querySelectorAll('button'));
+  vm.slots.forEach((slot, i) => {
+    const btn = buttons[i];
+    if (!btn) return;
+    btn.disabled = !slot.enabled;
+    btn.setAttribute('aria-label', `${slot.label} を使う`);
+    const badge = btn.querySelector('.badge');
+    if (badge) badge.textContent = slot.badge;
+  });
+}
+
+function span(className: string, text: string): HTMLSpanElement {
+  const el = document.createElement('span');
+  el.className = className;
+  el.textContent = text;
+  return el;
 }
 
 /**
@@ -251,7 +284,6 @@ const dialogOpen = (): boolean => menu.open || gameover.open || scores.open || c
 
 bindKeyboard(act, dialogOpen);
 bindButtons(byId('pad'), act);
-bindSlots(byId('slots'), (item) => act({ type: 'use', item }));
 
 // ---------------------------------------------------------------------------
 // 画面サイズ

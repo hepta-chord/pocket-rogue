@@ -31,7 +31,8 @@ import {
 import {
   CONSUMABLES,
   DROP_CHANCE,
-  STACK_MAX,
+  ITEM_NAMES,
+  stackLimit,
   emptyInventory,
   isEquip,
   itemLabel,
@@ -44,15 +45,35 @@ import {
 } from './items';
 import { Tile, canStep, generateMap, idx, inBounds, isWalkable, roomCenter, tileAt, type GameMap } from './map';
 import { Rng, hashSeed } from './rng';
-import type { CellKind, Health, LogEntry, LogKind, ViewActor, ViewCell, ViewItem, ViewModel } from './view';
+import type {
+  CellKind,
+  Health,
+  LogEntry,
+  LogKind,
+  ViewActor,
+  ViewCell,
+  ViewItem,
+  ViewModel,
+  ViewSlot,
+} from './view';
 
 export type Action =
   | { type: 'move'; dx: number; dy: number }
   | { type: 'wait' }
   | { type: 'use'; item: ConsumableKind }
+  | { type: 'cast'; spell: SpellKind }
   /** 確認プロンプトへの回答 */
   | { type: 'confirm' }
   | { type: 'cancel' };
+
+/** 魔法。コストはスタミナで払う */
+export type SpellKind = 'thunder';
+
+export const SPELLS: Record<SpellKind, { name: string; cost: number }> = {
+  thunder: { name: '雷', cost: 15 },
+};
+
+export const SPELL_KINDS = Object.keys(SPELLS) as SpellKind[];
 
 /**
  * 確認待ちの状態。
@@ -72,7 +93,7 @@ export interface StepResult {
   interrupt: boolean;
 }
 
-export const SAVE_VERSION = 9;
+export const SAVE_VERSION = 10;
 
 /**
  * 次のレベルまでに必要な経験値。
@@ -116,6 +137,13 @@ export interface GameState {
   inventory: Inventory;
   /** 確認待ち。null なら通常の操作を受け付ける */
   prompt: Prompt | null;
+  /** スタミナ。行動と被弾で減り、尽きると HP が削れる */
+  stamina: number;
+  staminaMax: number;
+  /** スタミナを減らすまでの残りターン数 */
+  staminaTick: number;
+  /** 自然回復までの残りターン数 */
+  regenTick: number;
   /** 身に着けている装備。持っていなければ null */
   weapon: Equipped | null;
   armor: Equipped | null;
@@ -131,10 +159,21 @@ const MAP_W = 40;
 const MAP_H = 30;
 const FOV_RADIUS = 7;
 const LOG_MAX = 30;
-/** 階を降りたときの回復量。自然回復は無いので、回復手段はこれと回復薬とレベルアップだけ */
-const DESCEND_HEAL = 5;
-/** レベルアップで増える最大 HP (実 HP も同じだけ増える) */
+/** レベルアップで増える最大 HP */
 const LEVEL_HP = 3;
+
+/** スタミナの初期最大値。イベント床で増減する */
+const STAMINA_MAX = 100;
+/** スタミナが 1 減るまでのターン数 */
+const STAMINA_DRAIN_TURNS = 5;
+/** 被弾 1 回で減るスタミナ。群れよけの盾を着ていると減らない */
+const STAMINA_PER_HIT = 1;
+/** スタミナがある間、HP が 1 回復するまでのターン数 */
+const REGEN_TURNS = 6;
+/** スタミナが尽きている間、毎ターン減る HP */
+const STARVE_DAMAGE = 1;
+/** スタミナ薬 1 個で戻る量。フロア 1 つ分の消費より少し多い程度に抑える */
+const ELIXIR_STAMINA = 30;
 
 export function newGame(seed: string): GameState {
   const rng = new Rng(hashSeed(seed));
@@ -156,6 +195,10 @@ export function newGame(seed: string): GameState {
     items: [],
     inventory: emptyInventory(),
     prompt: null,
+    stamina: STAMINA_MAX,
+    staminaMax: STAMINA_MAX,
+    staminaTick: STAMINA_DRAIN_TURNS,
+    regenTick: REGEN_TURNS,
     weapon: null,
     armor: null,
     visible: [],
@@ -183,6 +226,7 @@ export function step(state: GameState, action: Action): StepResult {
     return result;
   }
   if (action.type === 'confirm' || action.type === 'cancel') return none;
+  if (action.type === 'cast' && !canCast(state, action.spell)) return none;
 
   if (action.type === 'move') {
     const nx = p.x + action.dx;
@@ -201,7 +245,12 @@ export function step(state: GameState, action: Action): StepResult {
   } else if (action.type === 'use') {
     if (state.inventory[action.item] <= 0) return none;
     state.inventory[action.item]--;
-    useItem(state, rng, action.item);
+    useItem(state, action.item);
+    interrupt = true;
+  } else if (action.type === 'cast') {
+    if (!canCast(state, action.spell)) return none;
+    state.stamina -= SPELLS[action.spell].cost;
+    castSpell(state, rng, action.spell);
     interrupt = true;
   }
 
@@ -326,6 +375,7 @@ export function promptText(state: GameState): { text: string; confirm: string; c
 function endTurn(state: GameState, rng: Rng, opts: { enemies: boolean }): void {
   if (opts.enemies) monstersAct(state, rng);
   state.turn++;
+  tickStamina(state);
   updateFov(state);
 
   const p = state.player;
@@ -349,8 +399,8 @@ function descend(state: GameState, rng: Rng): void {
   p.x = start.x;
   p.y = start.y;
 
-  // 階層そのものでは強くならない。伸びるのは経験値だけで、降りたときは少し回復する
-  if (state.depth > 1) p.hp = Math.min(p.maxHp, p.hp + DESCEND_HEAL);
+  // 階層そのものでは強くならない。伸びるのは経験値だけである。
+  // 降りたときの回復はスタミナの自然回復に置き換えたので、ここでは回復しない
   state.score += depthScore(state.depth);
 
   state.monsters = spawnMonsters(rng, state.map, state.depth, start, () => state.nextId++);
@@ -358,7 +408,7 @@ function descend(state: GameState, rng: Rng): void {
   state.visible = new Array<number>(MAP_W * MAP_H).fill(0);
   state.explored = new Array<number>(MAP_W * MAP_H).fill(0);
   updateFov(state);
-  pushLog(state, 'info', state.depth === 1 ? 'B1。> を探して下に降りよう。' : `B${state.depth} に降りた。少し回復した。`);
+  pushLog(state, 'info', state.depth === 1 ? 'B1。> を探して下に降りよう。' : `B${state.depth} に降りた。`);
 }
 
 // ---------------------------------------------------------------------------
@@ -383,8 +433,9 @@ function pickUp(state: GameState): boolean {
   }
 
   const kind = item.kind;
-  if (state.inventory[kind] >= STACK_MAX) {
-    pushLog(state, 'info', `${name} はもう持てない (${STACK_MAX} 個まで)。`);
+  const limit = stackLimit(kind);
+  if (state.inventory[kind] >= limit) {
+    pushLog(state, 'info', `${name} はもう持てない (${limit} 個まで)。`);
     return true;
   }
   state.inventory[kind]++;
@@ -393,19 +444,41 @@ function pickUp(state: GameState): boolean {
   return true;
 }
 
-function useItem(state: GameState, rng: Rng, kind: ConsumableKind): void {
+/**
+ * 消耗品を使う。
+ *
+ * 回復薬 1 個の量を最大 HP の 1/4 に下げてある。
+ * 出るか出ないかの差がそのまま生存時間の差になっていたので、量を下げて出る数を増やした。
+ */
+function useItem(state: GameState, kind: ConsumableKind): void {
   const p = state.player;
   switch (kind) {
     case 'potion': {
-      const heal = Math.min(p.maxHp - p.hp, Math.max(8, Math.floor(p.maxHp / 2)));
+      const heal = Math.min(p.maxHp - p.hp, Math.max(3, Math.ceil(p.maxHp / 4)));
       p.hp += heal;
-      pushLog(state, 'player', `回復薬を飲んだ。HP が ${heal} 回復した。`);
+      pushLog(state, 'player', `HP 回復薬を飲んだ。HP が ${heal} 回復した。`);
       return;
     }
+    case 'elixir': {
+      const gain = Math.min(state.staminaMax - state.stamina, ELIXIR_STAMINA);
+      state.stamina += gain;
+      pushLog(state, 'player', `スタミナ薬を飲んだ。スタミナが ${gain} 戻った。`);
+      return;
+    }
+  }
+}
+
+/** 唱えられるか。スタミナが足りているかだけを見る */
+export function canCast(state: GameState, spell: SpellKind): boolean {
+  return !state.over && state.stamina >= SPELLS[spell].cost;
+}
+
+function castSpell(state: GameState, rng: Rng, spell: SpellKind): void {
+  switch (spell) {
     case 'thunder': {
       const targets = visibleMonsters(state);
       if (targets.length === 0) {
-        pushLog(state, 'player', '雷の巻物を読んだが、周りに敵はいなかった。');
+        pushLog(state, 'player', '雷を放ったが、周りに敵はいなかった。');
         return;
       }
       const dmg = 6 + state.depth * 2;
@@ -420,16 +493,14 @@ function useItem(state: GameState, rng: Rng, kind: ConsumableKind): void {
       }
       return;
     }
-    case 'map': {
-      revealMap(state);
-      pushLog(state, 'player', '地図の巻物を読んだ。この階の地形が頭に浮かんだ。');
-      return;
-    }
   }
 }
 
-/** 床と、床に隣接する壁を既知にする (壁だけの領域は塗らない) */
-function revealMap(state: GameState): void {
+/**
+ * 床と、床に隣接する壁を既知にする (壁だけの領域は塗らない)。
+ * 地図の巻物を廃したので、今はイベント床の効果として使う。
+ */
+export function revealMap(state: GameState): void {
   const { map } = state;
   for (let y = 0; y < map.height; y++) {
     for (let x = 0; x < map.width; x++) {
@@ -619,6 +690,12 @@ function monsterAttack(state: GameState, rng: Rng, m: Actor, opts: { pierce?: bo
   const head = opts.label ?? `${name}から`;
   const note = reduced > 0 ? ` (防具で ${reduced} 軽減)` : '';
   pushLog(state, 'enemy', `${head} ${hit.dealt} のダメージ。${note}`);
+
+  // 群れよけの盾を着ていなければ、被弾のたびにスタミナが減る。
+  // 数で押してくる相手ほどスタミナを削られるので、盾がその系統への備えになる
+  if (!armorHas(a, 'guard')) {
+    state.stamina = Math.max(0, state.stamina - STAMINA_PER_HIT);
+  }
 
   // 棘鎧の反撃。高 HP で殴り合いになる重装に効く
   if (armorHas(a, 'thorns') && p.hp > 0) thornsCounter(state, rng, m);
@@ -829,6 +906,40 @@ function updateFov(state: GameState): void {
   }
 }
 
+/**
+ * スタミナの経過処理。
+ *
+ * スタミナがある間は数ターンに 1 回 HP が回復し、尽きると毎ターン HP が減る。
+ * 減少だけが始まる形にすると、回復手段が乏しいときはほぼ確定死になって警告として働かない。
+ * 残っている間の自然回復とセットにすることで、HP をスタミナで買う一本の経済になる。
+ */
+function tickStamina(state: GameState): void {
+  const p = state.player;
+
+  if (state.stamina > 0) {
+    if (--state.staminaTick <= 0) {
+      state.staminaTick = STAMINA_DRAIN_TURNS;
+      state.stamina--;
+      if (state.stamina === 0) pushLog(state, 'alert', 'スタミナが尽きた。休まないと HP が減っていく。');
+      else if (state.stamina === Math.floor(state.staminaMax / 5)) {
+        pushLog(state, 'alert', 'スタミナが心もとない。');
+      }
+    }
+  }
+
+  if (state.stamina > 0) {
+    if (--state.regenTick <= 0) {
+      state.regenTick = REGEN_TURNS;
+      if (p.hp < p.maxHp) p.hp++;
+    }
+    return;
+  }
+
+  // 尽きている間は自然回復が止まり、行動のたびに HP が減る
+  state.regenTick = REGEN_TURNS;
+  p.hp -= STARVE_DAMAGE;
+}
+
 /** 外から 1 行足す (セーブを捨てた通知など、ゲームの外で起きたことを伝える) */
 export function addLog(state: GameState, kind: LogKind, text: string): void {
   pushLog(state, kind, text);
@@ -837,6 +948,26 @@ export function addLog(state: GameState, kind: LogKind, text: string): void {
 function pushLog(state: GameState, kind: LogKind, text: string): void {
   state.log.push({ kind, text, turn: state.turn });
   if (state.log.length > LOG_MAX) state.log.splice(0, state.log.length - LOG_MAX);
+}
+
+/**
+ * 操作スロット。消耗品と魔法を同じ並びに出す。
+ * 何を出すかはここで決め、描画層は並べるだけにする。
+ */
+function buildSlots(state: GameState): ViewSlot[] {
+  const items: ViewSlot[] = CONSUMABLES.map((kind) => ({
+    ref: { kind: 'item', id: kind },
+    label: ITEM_NAMES[kind],
+    badge: String(state.inventory[kind]),
+    enabled: !state.over && state.inventory[kind] > 0,
+  }));
+  const spells: ViewSlot[] = SPELL_KINDS.map((kind) => ({
+    ref: { kind: 'spell', id: kind },
+    label: SPELLS[kind].name,
+    badge: `${SPELLS[kind].cost}`,
+    enabled: canCast(state, kind),
+  }));
+  return [...items, ...spells];
 }
 
 /** HP の帯。半分より上は無傷扱い、1/4 以下を瀕死とする */
@@ -896,8 +1027,11 @@ export function toViewModel(state: GameState): ViewModel {
       level: state.level,
       xp: state.xp,
       xpNext: xpToNext(state.level),
+      stamina: state.stamina,
+      staminaMax: state.staminaMax,
     },
     inventory: CONSUMABLES.map((kind) => ({ kind, count: state.inventory[kind] })),
+    slots: buildSlots(state),
     depth: state.depth,
     turn: state.turn,
     kills: state.kills,

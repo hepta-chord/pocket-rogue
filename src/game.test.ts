@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { newGame, step, toViewModel, xpToNext, type Action, type GameState } from './game';
-import type { Item } from './items';
+import { SPELLS, canCast, newGame, step, toViewModel, xpToNext, type Action, type GameState } from './game';
+import { stackLimit, type Item } from './items';
 import { Tile, isWalkable, tileAt } from './map';
 
 function play(seed: string, actions: Action[]): GameState {
@@ -272,6 +272,173 @@ describe('確認プロンプト', () => {
     expect(vm.prompt?.text).toContain('B2');
     expect(vm.prompt?.confirm).toBeTruthy();
     expect(vm.prompt?.cancel).toBeTruthy();
+  });
+});
+
+describe('スタミナ', () => {
+  /** 敵を消して、指定ターン待つ */
+  function idle(s: GameState, turns: number): void {
+    s.monsters = [];
+    for (let i = 0; i < turns; i++) step(s, WAIT);
+  }
+
+  it('最初は満タンで始まる', () => {
+    const s = newGame('ST1');
+    expect(s.stamina).toBe(s.staminaMax);
+    expect(s.staminaMax).toBeGreaterThan(0);
+  });
+
+  it('時間で減る', () => {
+    const s = newGame('ST2');
+    idle(s, 30);
+    expect(s.stamina).toBeLessThan(s.staminaMax);
+    // 1 ターン 1 ずつは減らない (数ターンに 1)
+    expect(s.stamina).toBeGreaterThan(s.staminaMax - 30);
+  });
+
+  it('ある間は HP が自然回復する', () => {
+    const s = newGame('ST3');
+    s.player.hp = 5;
+    idle(s, 30);
+    expect(s.player.hp).toBeGreaterThan(5);
+    expect(s.player.hp).toBeLessThanOrEqual(s.player.maxHp);
+  });
+
+  it('自然回復で最大値を超えない', () => {
+    const s = newGame('ST4');
+    idle(s, 60);
+    expect(s.player.hp).toBeLessThanOrEqual(s.player.maxHp);
+  });
+
+  it('尽きると毎ターン HP が減る', () => {
+    const s = newGame('ST5');
+    s.stamina = 0;
+    s.player.hp = 20;
+    s.player.maxHp = 20;
+    idle(s, 5);
+    expect(s.player.hp).toBe(15);
+  });
+
+  it('尽きて HP を削り切ると倒れる', () => {
+    const s = newGame('ST6');
+    s.stamina = 0;
+    s.player.hp = 3;
+    idle(s, 10);
+    expect(s.over).toBe(true);
+  });
+
+  it('被弾するとスタミナが減る', () => {
+    const s = newGame('ST7');
+    const spot = neighborOf(s, s.player);
+    if (!spot) return;
+    const m = s.monsters[0];
+    s.monsters = [m];
+    m.x = spot.x;
+    m.y = spot.y;
+    m.evasion = 0;
+    m.atk = 1;
+    s.player.maxHp = 999;
+    s.player.hp = 999;
+    const before = s.stamina;
+    // 相手に殴らせる。回避で外れることがあるので数ターン回す
+    for (let i = 0; i < 6; i++) step(s, WAIT);
+    expect(s.stamina).toBeLessThan(before);
+  });
+
+  it('群れよけの盾を着ていると被弾でスタミナが減らない', () => {
+    const withGuard = (id: 'swarmGuard' | 'chain'): number => {
+      const s = newGame('ST8');
+      s.armor = { id, power: 1 };
+      const spot = neighborOf(s, s.player);
+      if (!spot) return 0;
+      const m = s.monsters[0];
+      s.monsters = [m];
+      m.x = spot.x;
+      m.y = spot.y;
+      m.evasion = 0;
+      m.atk = 1;
+      s.player.maxHp = 999;
+      s.player.hp = 999;
+      const before = s.stamina;
+      for (let i = 0; i < 6; i++) step(s, WAIT);
+      return before - s.stamina;
+    };
+    // 時間による減りは同じなので、差が出るのは被弾ぶんだけ
+    expect(withGuard('swarmGuard')).toBeLessThan(withGuard('chain'));
+  });
+
+  it('スタミナ薬で戻り、最大値を超えない', () => {
+    const s = newGame('ST9');
+    s.stamina = 10;
+    s.inventory.elixir = 1;
+    step(s, { type: 'use', item: 'elixir' });
+    expect(s.stamina).toBeGreaterThan(10);
+
+    s.stamina = s.staminaMax - 1;
+    s.inventory.elixir = 1;
+    step(s, { type: 'use', item: 'elixir' });
+    expect(s.stamina).toBe(s.staminaMax);
+  });
+});
+
+describe('魔法', () => {
+  it('スタミナが足りないと唱えられない', () => {
+    const s = newGame('SP1');
+    s.stamina = 0;
+    expect(canCast(s, 'thunder')).toBe(false);
+    const before = s.turn;
+    expect(step(s, { type: 'cast', spell: 'thunder' }).acted).toBe(false);
+    expect(s.turn).toBe(before);
+  });
+
+  it('唱えるとスタミナを支払う', () => {
+    const s = newGame('SP2');
+    s.monsters = [];
+    const before = s.stamina;
+    expect(step(s, { type: 'cast', spell: 'thunder' }).acted).toBe(true);
+    expect(s.stamina).toBeLessThanOrEqual(before - SPELLS.thunder.cost);
+  });
+
+  it('見えている敵に当たる', () => {
+    const s = newGame('SP3');
+    const spot = neighborOf(s, s.player);
+    if (!spot) return;
+    const m = s.monsters[0];
+    s.monsters = [m];
+    m.x = spot.x;
+    m.y = spot.y;
+    m.hp = 1;
+    step(s, { type: 'cast', spell: 'thunder' });
+    expect(s.monsters).toHaveLength(0);
+    expect(s.kills).toBe(1);
+  });
+
+  it('スロットに消耗品と魔法が並ぶ', () => {
+    const s = newGame('SP4');
+    const vm = toViewModel(s);
+    expect(vm.slots.map((x) => x.ref.kind)).toEqual(['item', 'item', 'spell']);
+    // 持っていない消耗品は押せない
+    expect(vm.slots[0].enabled).toBe(false);
+    // スタミナが満タンなら魔法は押せる
+    expect(vm.slots[2].enabled).toBe(true);
+  });
+});
+
+describe('消耗品の所持上限', () => {
+  it('種類ごとに違う', () => {
+    expect(stackLimit('potion')).toBeGreaterThan(stackLimit('elixir'));
+  });
+
+  it('上限に達すると拾わない', () => {
+    const s = newGame('LIMIT1');
+    s.inventory.elixir = stackLimit('elixir');
+    const spot = neighborOf(s, s.player);
+    if (!spot) return;
+    s.monsters = [];
+    s.items = [{ kind: 'elixir', power: 0, x: spot.x, y: spot.y }];
+    step(s, { type: 'move', dx: spot.x - s.player.x, dy: spot.y - s.player.y });
+    expect(s.inventory.elixir).toBe(stackLimit('elixir'));
+    expect(s.items).toHaveLength(1);
   });
 });
 

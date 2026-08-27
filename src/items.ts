@@ -15,11 +15,13 @@ import type { Rng } from './rng';
 // 操作性のため、使うアイテムは「対象指定が要らない消耗品」だけにしてある。
 // 装備は拾ったときに持ち替えるかどうかを選ぶ (game.ts の確認プロンプト)。
 
-export type ConsumableKind = 'potion' | 'thunder' | 'map';
+// 消耗品は 2 種だけにする。
+// 雷は魔法 (スタミナ消費) に、地図は床のイベント効果に移した。
+export type ConsumableKind = 'potion' | 'elixir';
 export type EquipKind = EquipSlot;
 export type ItemKind = ConsumableKind | EquipKind;
 
-export const CONSUMABLES: readonly ConsumableKind[] = ['potion', 'thunder', 'map'];
+export const CONSUMABLES: readonly ConsumableKind[] = ['potion', 'elixir'];
 
 export interface Item {
   kind: ItemKind;
@@ -41,19 +43,28 @@ export interface Item {
 export type Inventory = Record<ConsumableKind, number>;
 
 export const ITEM_NAMES: Record<ItemKind, string> = {
-  potion: '回復薬',
-  thunder: '雷の巻物',
-  map: '地図の巻物',
+  potion: 'HP 回復薬',
+  elixir: 'スタミナ薬',
   weapon: '武器',
   armor: '防具',
 };
 
-/** 同じ消耗品を持てる上限 */
-export const STACK_MAX = 5;
+/**
+ * 消耗品を持てる上限。種類ごとに分ける。
+ *
+ * スタミナ薬を無制限に持ち歩けるとスタミナ切れのペナルティが無効になり、
+ * 居座って稼ぐのが最適解に戻る。
+ */
+export const STACK_LIMITS: Record<ConsumableKind, number> = { potion: 5, elixir: 3 };
+
+export function stackLimit(kind: ConsumableKind): number {
+  return STACK_LIMITS[kind];
+}
 
 // 攻撃力がレベルで伸びなくなったぶん、武器の引きが勝敗に直結する。
 // 武器の重みを上げて、1 個あたりの重みを下げる。
-const WEIGHTS: Record<ItemKind, number> = { potion: 5, thunder: 2, map: 2, weapon: 4, armor: 3 };
+// 回復薬は 1 個あたりの量を下げたぶん、出る数を増やしてある。
+const WEIGHTS: Record<ItemKind, number> = { potion: 6, elixir: 4, weapon: 4, armor: 3 };
 const KINDS = Object.keys(WEIGHTS) as ItemKind[];
 
 /** 敵を倒したときに装備を落とす確率 */
@@ -63,7 +74,7 @@ export const DROP_CHANCE = 0.16;
 const DROP_ODDITY_RATE = 0.2;
 
 export function emptyInventory(): Inventory {
-  return { potion: 0, thunder: 0, map: 0 };
+  return { potion: 0, elixir: 0 };
 }
 
 export function isEquip(kind: ItemKind): kind is EquipKind {
