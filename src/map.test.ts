@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { Tile, canStep, generateMap, idx, roomCenter, type GameMap } from './map';
+import { Tile, canDetour, canStep, generateMap, idx, roomCenter, type GameMap } from './map';
 import { Rng, hashSeed } from './rng';
 
 const W = 40;
@@ -66,6 +66,31 @@ describe('canStep', () => {
   it('斜め先が壁なら両隣によらず通さない', () => {
     const map = grid(['...', '...', '..#']);
     expect(canStep(map, 1, 1, 1, 1)).toBe(false);
+  });
+});
+
+describe('canDetour', () => {
+  const grid = (rows: string[]): GameMap => ({
+    width: rows[0].length,
+    height: rows.length,
+    tiles: rows.flatMap((r) => [...r].map((c) => (c === '#' ? Tile.Wall : Tile.Floor))),
+    rooms: [],
+  });
+
+  it('広い部屋なら 1 マス塞いでも回り道がある', () => {
+    const map = grid(['#####', '#...#', '#...#', '#...#', '#####']);
+    expect(canDetour(map, { x: 1, y: 1 }, { x: 3, y: 3 }, { x: 2, y: 2 })).toBe(true);
+  });
+
+  it('唯一の通路を塞ぐと届かない', () => {
+    const map = grid(['#####', '#.#.#', '#.#.#', '#...#', '#####']);
+    expect(canDetour(map, { x: 1, y: 1 }, { x: 3, y: 1 }, { x: 2, y: 3 })).toBe(false);
+  });
+
+  it('起点や終点そのものは塞げない', () => {
+    const map = grid(['#####', '#...#', '#...#', '#...#', '#####']);
+    expect(canDetour(map, { x: 1, y: 1 }, { x: 3, y: 3 }, { x: 1, y: 1 })).toBe(false);
+    expect(canDetour(map, { x: 1, y: 1 }, { x: 3, y: 3 }, { x: 3, y: 3 })).toBe(false);
   });
 });
 

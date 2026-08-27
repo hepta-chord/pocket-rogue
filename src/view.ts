@@ -7,7 +7,16 @@ import type { ActorKind } from './entity';
 import type { SpellKind } from './game';
 import type { ConsumableKind, ItemKind } from './items';
 
-export type CellKind = 'wall' | 'floor' | 'stairs' | 'unknown';
+export type CellKind =
+  | 'wall'
+  | 'floor'
+  | 'stairs'
+  | 'unknown'
+  /** イベント床。色ごとに効果の大きさとマイナスの出る率が違う */
+  | 'floorGreen'
+  | 'floorYellow'
+  | 'floorRed'
+  | 'floorBlue';
 export type Visibility = 'visible' | 'remembered' | 'unknown';
 
 export interface ViewCell {

@@ -49,6 +49,47 @@ export function canStep(map: GameMap, x: number, y: number, dx: number, dy: numb
   return isWalkable(map, x + dx, y) || isWalkable(map, x, y + dy);
 }
 
+/**
+ * blocked を塞いでも from から to まで歩いて行けるか。
+ *
+ * 取り返しがつかない効果を持つイベント床の置き場所を絞るのに使う。
+ * 階段への唯一の通路に出ると、踏むかどうかの選択が消えて事故になる。
+ * 40 x 30 の格子なので、階ごとに数回やっても負荷にならない。
+ */
+export function canDetour(
+  map: GameMap,
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+  blocked: { x: number; y: number },
+): boolean {
+  if (from.x === blocked.x && from.y === blocked.y) return false;
+  if (to.x === blocked.x && to.y === blocked.y) return false;
+
+  const target = idx(map, to.x, to.y);
+  const wall = idx(map, blocked.x, blocked.y);
+  const seen = new Uint8Array(map.width * map.height);
+  const queue = [from];
+  seen[idx(map, from.x, from.y)] = 1;
+
+  for (let head = 0; head < queue.length; head++) {
+    const { x, y } = queue[head];
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        if (dx === 0 && dy === 0) continue;
+        if (!canStep(map, x, y, dx, dy)) continue;
+        const nx = x + dx;
+        const ny = y + dy;
+        const i = idx(map, nx, ny);
+        if (i === wall || seen[i] === 1) continue;
+        if (i === target) return true;
+        seen[i] = 1;
+        queue.push({ x: nx, y: ny });
+      }
+    }
+  }
+  return false;
+}
+
 export function blocksSight(map: GameMap, x: number, y: number): boolean {
   return tileAt(map, x, y) === Tile.Wall;
 }

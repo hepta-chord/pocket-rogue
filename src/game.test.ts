@@ -1,5 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { SPELLS, canCast, newGame, step, toViewModel, xpToNext, type Action, type GameState } from './game';
+import type { FloorEffect } from './floors';
+import {
+  SPELLS,
+  applyFloorEffect,
+  canCast,
+  newGame,
+  step,
+  toViewModel,
+  xpToNext,
+  type Action,
+  type GameState,
+} from './game';
 import { stackLimit, type Item } from './items';
 import { Tile, isWalkable, tileAt } from './map';
 
@@ -442,6 +453,110 @@ describe('消耗品の所持上限', () => {
   });
 });
 
+describe('イベント床', () => {
+  /** プレイヤーの隣に床を置き、踏ませる */
+  function stepOnto(s: GameState, kind: 'green' | 'yellow' | 'red' | 'blue'): boolean {
+    const spot = neighborOf(s, s.player);
+    if (!spot) return false;
+    s.monsters = [];
+    s.items = [];
+    s.floors = [{ kind, x: spot.x, y: spot.y }];
+    step(s, { type: 'move', dx: spot.x - s.player.x, dy: spot.y - s.player.y });
+    return true;
+  }
+
+  it('各階に青い床が置かれる', () => {
+    const s = newGame('FL1');
+    expect(s.floors.filter((f) => f.kind === 'blue')).toHaveLength(1);
+  });
+
+  it('踏むと消える', () => {
+    const s = newGame('FL2');
+    if (!stepOnto(s, 'green')) return;
+    expect(s.floors).toHaveLength(0);
+  });
+
+  it('青い床は HP を大きく回復する', () => {
+    const s = newGame('FL3');
+    s.player.maxHp = 40;
+    s.player.hp = 5;
+    if (!stepOnto(s, 'blue')) return;
+    expect(s.player.hp).toBe(40);
+  });
+
+  it('ViewModel にセルの種別が出る', () => {
+    const s = newGame('FL4');
+    const blue = s.floors.find((f) => f.kind === 'blue');
+    if (!blue) return;
+    s.explored[blue.y * s.map.width + blue.x] = 1;
+    const vm = toViewModel(s);
+    expect(vm.cells[blue.y * vm.width + blue.x].kind).toBe('floorBlue');
+  });
+});
+
+describe('腐食', () => {
+  it('装備の強さが 1 下がる', () => {
+    const s = newGame('CO1');
+    s.weapon = { id: 'sword', power: 5 };
+    s.armor = { id: 'chain', power: 2 };
+    applyFloorEffectForTest(s, { kind: 'corrode' });
+    // 深いほうから減る
+    expect(s.weapon?.power).toBe(4);
+    expect(s.armor?.power).toBe(2);
+  });
+
+  it('護符を着ていると防げる', () => {
+    const s = newGame('CO2');
+    s.weapon = { id: 'sword', power: 5 };
+    s.armor = { id: 'wardCharm', power: 3 };
+    applyFloorEffectForTest(s, { kind: 'corrode' });
+    expect(s.weapon?.power).toBe(5);
+    expect(s.armor?.power).toBe(3);
+  });
+
+  it('強さ 0 の装備はそれ以上腐食しない', () => {
+    const s = newGame('CO3');
+    s.weapon = { id: 'sword', power: 0 };
+    s.armor = null;
+    applyFloorEffectForTest(s, { kind: 'corrode' });
+    expect(s.weapon?.power).toBe(0);
+  });
+
+  it('腐食すると床の「断った」印が外れる', () => {
+    const s = newGame('CO4');
+    s.weapon = { id: 'sword', power: 5 };
+    s.items = [{ kind: 'weapon', power: 4, equip: 'axe', x: 1, y: 1, declined: true }];
+    applyFloorEffectForTest(s, { kind: 'corrode' });
+    expect(s.items[0].declined).toBeUndefined();
+  });
+});
+
+describe('一時的な効果', () => {
+  it('残りターン数が減り、切れる', () => {
+    const s = newGame('EF1');
+    s.monsters = [];
+    applyFloorEffectForTest(s, { kind: 'haste', turns: 3 });
+    expect(s.effects.haste).toBe(3);
+    step(s, WAIT);
+    expect(s.effects.haste).toBe(2);
+    step(s, WAIT);
+    step(s, WAIT);
+    expect(s.effects.haste).toBeUndefined();
+  });
+
+  it('スタミナの最大値が増減し、下限を割らない', () => {
+    const s = newGame('EF2');
+    const before = s.staminaMax;
+    applyFloorEffectForTest(s, { kind: 'boostStaminaMax', amount: 10 });
+    expect(s.staminaMax).toBe(before + 10);
+
+    // 何度削っても 20 は残る
+    for (let i = 0; i < 20; i++) applyFloorEffectForTest(s, { kind: 'drainStaminaMax', amount: 15 });
+    expect(s.staminaMax).toBeGreaterThanOrEqual(20);
+    expect(s.stamina).toBeLessThanOrEqual(s.staminaMax);
+  });
+});
+
 describe('装備の持ち替え', () => {
   /** プレイヤーの隣に装備を置き、踏ませる */
   function stepOntoEquip(s: GameState, item: Omit<Item, 'x' | 'y'>): boolean {
@@ -581,6 +696,14 @@ describe('toViewModel', () => {
     expect(bandAt(1)).toBe('critical');
   });
 });
+
+/**
+ * 効果を 1 つだけ確実に起こす。
+ * rollEffect は乱数なので、効果そのものを検証したいときはこちらを使う。
+ */
+function applyFloorEffectForTest(s: GameState, effect: FloorEffect): void {
+  applyFloorEffect(s, effect);
+}
 
 /** プレイヤーの隣で歩けるマスを 1 つ返す */
 function neighborOf(s: GameState, p: { x: number; y: number }): { x: number; y: number } | null {

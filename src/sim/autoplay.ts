@@ -24,6 +24,7 @@ import {
   weaponAtk,
   type Equipped,
 } from '../equip';
+import type { FloorKind } from '../floors';
 import { isEquip, stackLimit, type ConsumableKind, type Item } from '../items';
 import { canStep, idx, isWalkable, Tile } from '../map';
 
@@ -36,9 +37,17 @@ export interface Policy {
   elixirAt: number;
   /** この歩数以内に見えているアイテムがあれば、階段より先に取りにいく */
   itemRange: number;
+  /** HP がこの割合を下回ったら青い床を取りにいく */
+  healFloorAt: number;
 }
 
-export const DEFAULT_POLICY: Policy = { potionAt: 0.45, thunderAt: 3, elixirAt: 0.25, itemRange: 14 };
+export const DEFAULT_POLICY: Policy = {
+  potionAt: 0.45,
+  thunderAt: 3,
+  elixirAt: 0.25,
+  itemRange: 14,
+  healFloorAt: 0.6,
+};
 
 export interface RunLimits {
   /** 1 つの run で進める上限 */
@@ -196,6 +205,12 @@ function decide(state: GameState, policy: Policy): Action {
   const adjacent = seen.find((m) => Math.max(Math.abs(m.x - p.x), Math.abs(m.y - p.y)) === 1);
   if (adjacent) return { type: 'move', dx: Math.sign(adjacent.x - p.x), dy: Math.sign(adjacent.y - p.y) };
 
+  // 傷ついていたら、立て直しの拠点である青い床を先に取りにいく
+  if (ratio <= policy.healFloorAt) {
+    const heal = nearestFloorStep(state, 'blue', policy.itemRange);
+    if (heal) return heal;
+  }
+
   const item = nearestItemStep(state, policy.itemRange);
   if (item) return item;
 
@@ -248,6 +263,14 @@ function weaponScore(e: Equipped | null): number {
 
 function armorScore(e: Equipped | null): number {
   return armorDefense(e) + armorEvasion(e) * 4;
+}
+
+function nearestFloorStep(state: GameState, kind: FloorKind, range: number): Action | null {
+  const known = state.floors.filter(
+    (f) => f.kind === kind && state.explored[idx(state.map, f.x, f.y)] === 1,
+  );
+  if (known.length === 0) return null;
+  return bfsStep(state, known.map((f) => ({ x: f.x, y: f.y })), range);
 }
 
 function stepTowardStairs(state: GameState): Action | null {

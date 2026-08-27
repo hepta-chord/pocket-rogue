@@ -15,6 +15,11 @@ export const CELL_GLYPHS: Record<CellKind, Glyph> = {
   floor: { ch: '.', fg: '#5a5a66' },
   stairs: { ch: '>', fg: '#ffd166' },
   unknown: { ch: ' ', fg: '#000000' },
+  // イベント床。色で効果の大きさと危なさが読めるようにする
+  floorGreen: { ch: '~', fg: '#7fd17f' },
+  floorYellow: { ch: '~', fg: '#ffd166' },
+  floorRed: { ch: '~', fg: '#ff6b6b' },
+  floorBlue: { ch: '~', fg: '#7fc4ff' },
 };
 
 export const ACTOR_GLYPHS: Record<ActorKind, Glyph> = {

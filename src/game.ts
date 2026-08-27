@@ -13,6 +13,7 @@ import {
   type MonsterKind,
 } from './entity';
 import { MONSTER_ROLL_FLOOR, PLAYER_ROLL_FLOOR, applyDefense, strike } from './combat';
+import { FLOORS, rollEffect, spawnFloors, type FloorEffect, type FloorTile, type Magnitude } from './floors';
 import { computeFov } from './fov';
 import {
   CRIT_CHANCE,
@@ -66,6 +67,9 @@ export type Action =
   | { type: 'confirm' }
   | { type: 'cancel' };
 
+/** 残りターン数で切れる効果 */
+export type TimedEffect = 'haste' | 'slow';
+
 /** 魔法。コストはスタミナで払う */
 export type SpellKind = 'thunder';
 
@@ -93,7 +97,7 @@ export interface StepResult {
   interrupt: boolean;
 }
 
-export const SAVE_VERSION = 10;
+export const SAVE_VERSION = 11;
 
 /**
  * 次のレベルまでに必要な経験値。
@@ -133,6 +137,10 @@ export interface GameState {
   monsters: Actor[];
   /** 床に落ちているアイテム */
   items: Item[];
+  /** 踏むと効果が出る床。踏んだら消える */
+  floors: FloorTile[];
+  /** 残りターン数つきの効果。0 になったら切れる */
+  effects: Partial<Record<TimedEffect, number>>;
   /** 持っている消耗品の数 */
   inventory: Inventory;
   /** 確認待ち。null なら通常の操作を受け付ける */
@@ -193,6 +201,8 @@ export function newGame(seed: string): GameState {
     player: createPlayer(0, 0),
     monsters: [],
     items: [],
+    floors: [],
+    effects: {},
     inventory: emptyInventory(),
     prompt: null,
     stamina: STAMINA_MAX,
@@ -237,7 +247,8 @@ export function step(state: GameState, action: Action): StepResult {
     } else if (canStep(state.map, p.x, p.y, action.dx, action.dy)) {
       p.x = nx;
       p.y = ny;
-      interrupt = pickUp(state);
+      if (stepOnFloor(state, rng)) interrupt = true;
+      if (pickUp(state)) interrupt = true;
     } else {
       state.rngState = rng.state;
       return none;
@@ -373,8 +384,13 @@ export function promptText(state: GameState): { text: string; confirm: string; c
  * 追加の湧き、追跡者の出現判定は、すべてここに乗せる。
  */
 function endTurn(state: GameState, rng: Rng, opts: { enemies: boolean }): void {
-  if (opts.enemies) monstersAct(state, rng);
+  if (opts.enemies) {
+    // 高速移動の間は 2 ターンに 1 回だけ敵が動き、鈍足の間は 2 回動く
+    const times = state.effects.slow ? 2 : state.effects.haste && state.turn % 2 === 1 ? 0 : 1;
+    for (let i = 0; i < times; i++) monstersAct(state, rng);
+  }
   state.turn++;
+  tickEffects(state);
   tickStamina(state);
   updateFov(state);
 
@@ -405,10 +421,158 @@ function descend(state: GameState, rng: Rng): void {
 
   state.monsters = spawnMonsters(rng, state.map, state.depth, start, () => state.nextId++);
   state.items = spawnItems(rng, state.map, state.depth, start, state.monsters);
+  const stairsAt = stairsPos(state.map);
+  state.floors = stairsAt
+    ? spawnFloors(rng, state.map, state.depth, start, stairsAt, [...state.monsters, ...state.items])
+    : [];
+  state.effects = {};
   state.visible = new Array<number>(MAP_W * MAP_H).fill(0);
   state.explored = new Array<number>(MAP_W * MAP_H).fill(0);
   updateFov(state);
   pushLog(state, 'info', state.depth === 1 ? 'B1。> を探して下に降りよう。' : `B${state.depth} に降りた。`);
+}
+
+// ---------------------------------------------------------------------------
+// イベント床
+
+function stairsPos(map: GameMap): { x: number; y: number } | null {
+  const i = map.tiles.indexOf(Tile.StairsDown);
+  return i < 0 ? null : { x: i % map.width, y: Math.floor(i / map.width) };
+}
+
+/** 足元のイベント床を踏む。踏んだら消える。何か起きたら true */
+function stepOnFloor(state: GameState, rng: Rng): boolean {
+  const p = state.player;
+  const i = state.floors.findIndex((f) => f.x === p.x && f.y === p.y);
+  if (i < 0) return false;
+  const floor = state.floors[i];
+  state.floors.splice(i, 1);
+
+  const effect = rollEffect(rng, floor.kind);
+  pushLog(state, 'info', `${FLOORS[floor.kind].name}を踏んだ。`);
+  applyFloorEffect(state, effect);
+  return true;
+}
+
+/** 深さと最大 HP から、大きさの段階を実数に変える */
+function healAmount(state: GameState, size: Magnitude): number {
+  const max = state.player.maxHp;
+  if (size === 'small') return Math.max(3, Math.ceil(max / 5));
+  if (size === 'medium') return Math.max(5, Math.ceil(max / 3));
+  return max;
+}
+
+function damageAmount(state: GameState, size: Magnitude): number {
+  const base = 2 + Math.floor(state.depth / 3);
+  return size === 'small' ? base : size === 'medium' ? base * 2 : base * 3;
+}
+
+function xpAmount(state: GameState, size: Magnitude): number {
+  const base = xpToNext(state.level);
+  return Math.max(1, Math.ceil(base * (size === 'small' ? 0.2 : size === 'medium' ? 0.4 : 0.8)));
+}
+
+/** 効果を 1 つ適用する。踏んだときのほか、テストからも呼ぶ */
+export function applyFloorEffect(state: GameState, effect: FloorEffect): void {
+  const p = state.player;
+  switch (effect.kind) {
+    case 'healHp': {
+      const heal = Math.min(p.maxHp - p.hp, healAmount(state, effect.size));
+      p.hp += heal;
+      pushLog(state, 'player', heal > 0 ? `HP が ${heal} 回復した。` : '傷は無かった。');
+      return;
+    }
+    case 'damage': {
+      const dmg = damageAmount(state, effect.size);
+      p.hp -= dmg;
+      pushLog(state, 'enemy', `毒気に当てられた。${dmg} のダメージ。`);
+      return;
+    }
+    case 'restoreStamina': {
+      const gain = Math.min(state.staminaMax - state.stamina, effect.amount);
+      state.stamina += gain;
+      pushLog(state, 'player', `スタミナが ${gain} 戻った。`);
+      return;
+    }
+    case 'gainXp': {
+      const amount = xpAmount(state, effect.size);
+      pushLog(state, 'player', `経験値が ${amount} 入った。`);
+      gainXp(state, amount);
+      return;
+    }
+    case 'boostAtk':
+      p.atk += effect.amount;
+      pushLog(state, 'player', `力がみなぎる。攻撃力が ${effect.amount} 上がった。`);
+      return;
+    case 'boostDef':
+      p.def += effect.amount;
+      pushLog(state, 'player', `体が硬くなった。防御力が ${effect.amount} 上がった。`);
+      return;
+    case 'boostStaminaMax':
+      state.staminaMax += effect.amount;
+      state.stamina += effect.amount;
+      pushLog(state, 'player', `スタミナの最大値が ${effect.amount} 増えた。`);
+      return;
+    case 'drainStaminaMax': {
+      // 最大値が 0 になると即死になるので下限を残す
+      const lost = Math.min(effect.amount, state.staminaMax - 20);
+      if (lost <= 0) {
+        pushLog(state, 'info', '何も起きなかった。');
+        return;
+      }
+      state.staminaMax -= lost;
+      state.stamina = Math.min(state.stamina, state.staminaMax);
+      pushLog(state, 'alert', `スタミナの最大値が ${lost} 減った。`);
+      return;
+    }
+    case 'corrode':
+      corrode(state);
+      return;
+    case 'haste':
+      state.effects.haste = (state.effects.haste ?? 0) + effect.turns;
+      pushLog(state, 'player', '体が軽い。しばらく敵より速く動ける。');
+      return;
+    case 'slow':
+      state.effects.slow = (state.effects.slow ?? 0) + effect.turns;
+      pushLog(state, 'alert', '足が重い。しばらく敵に余計に動かれる。');
+      return;
+    case 'reveal':
+      revealMap(state);
+      pushLog(state, 'player', 'この階の地形が頭に浮かんだ。');
+      return;
+  }
+}
+
+/**
+ * 腐食。装備の強さを 1 下げる。
+ *
+ * 変則よけの護符を着ていると防げる。
+ * 弱った装備は落ちているものと比べ直せるように、床の「断った」印を外す。
+ */
+function corrode(state: GameState): void {
+  if (armorHas(state.armor, 'wardCorrosion')) {
+    pushLog(state, 'player', '護符が腐食を防いだ。');
+    return;
+  }
+  const targets: EquipSlot[] = [];
+  if (state.weapon && state.weapon.power > 0) targets.push('weapon');
+  if (state.armor && state.armor.power > 0) targets.push('armor');
+  if (targets.length === 0) {
+    pushLog(state, 'info', '腐食する装備が無かった。');
+    return;
+  }
+  // 武器と防具の両方を持っていたら、深いほうから減らす
+  const slot = targets.length === 1 ? targets[0] : pickHeavier(state, targets);
+  const current = slot === 'weapon' ? state.weapon : state.armor;
+  if (!current) return;
+  current.power--;
+  clearDeclined(state, slot);
+  pushLog(state, 'alert', `${equipName(current)} に腐食した。`);
+}
+
+function pickHeavier(state: GameState, slots: EquipSlot[]): EquipSlot {
+  const power = (slot: EquipSlot): number => (slot === 'weapon' ? state.weapon?.power : state.armor?.power) ?? 0;
+  return power(slots[0]) >= power(slots[1]) ? slots[0] : slots[1];
 }
 
 // ---------------------------------------------------------------------------
@@ -906,6 +1070,20 @@ function updateFov(state: GameState): void {
   }
 }
 
+/** 残りターン数つきの効果を 1 ターンぶん進める */
+function tickEffects(state: GameState): void {
+  for (const key of ['haste', 'slow'] as TimedEffect[]) {
+    const left = state.effects[key];
+    if (left === undefined) continue;
+    if (left <= 1) {
+      delete state.effects[key];
+      pushLog(state, 'info', key === 'haste' ? '体の軽さが消えた。' : '足の重さが取れた。');
+    } else {
+      state.effects[key] = left - 1;
+    }
+  }
+}
+
 /**
  * スタミナの経過処理。
  *
@@ -983,6 +1161,13 @@ const CELL_KIND: Record<Tile, CellKind> = {
   [Tile.StairsDown]: 'stairs',
 };
 
+const FLOOR_CELL: Record<FloorTile['kind'], CellKind> = {
+  green: 'floorGreen',
+  yellow: 'floorYellow',
+  red: 'floorRed',
+  blue: 'floorBlue',
+};
+
 /** 描画層に渡す、見た目を含まないデータに変換する */
 export function toViewModel(state: GameState): ViewModel {
   const { map } = state;
@@ -993,6 +1178,13 @@ export function toViewModel(state: GameState): ViewModel {
     } else {
       cells[i] = { kind: CELL_KIND[map.tiles[i]], vis: state.visible[i] === 1 ? 'visible' : 'remembered' };
     }
+  }
+
+  // イベント床は地形の上に重ねる。一度見た場所のものは覚えておく
+  for (const f of state.floors) {
+    const i = idx(map, f.x, f.y);
+    if (state.explored[i] !== 1) continue;
+    cells[i] = { kind: FLOOR_CELL[f.kind], vis: cells[i].vis };
   }
 
   // アイテムは一度見た場所のものを覚えておく (見えていなくても表示する)
