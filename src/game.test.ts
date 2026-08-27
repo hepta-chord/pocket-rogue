@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { newGame, step, toViewModel, xpToNext, type Action, type GameState } from './game';
+import type { Item } from './items';
 import { Tile, isWalkable, tileAt } from './map';
 
 function play(seed: string, actions: Action[]): GameState {
@@ -271,6 +272,104 @@ describe('確認プロンプト', () => {
     expect(vm.prompt?.text).toContain('B2');
     expect(vm.prompt?.confirm).toBeTruthy();
     expect(vm.prompt?.cancel).toBeTruthy();
+  });
+});
+
+describe('装備の持ち替え', () => {
+  /** プレイヤーの隣に装備を置き、踏ませる */
+  function stepOntoEquip(s: GameState, item: Omit<Item, 'x' | 'y'>): boolean {
+    const spot = neighborOf(s, s.player);
+    if (!spot) return false;
+    s.monsters = [];
+    s.items = [{ ...item, x: spot.x, y: spot.y }];
+    step(s, { type: 'move', dx: spot.x - s.player.x, dy: spot.y - s.player.y });
+    return true;
+  }
+
+  const sword: Omit<Item, 'x' | 'y'> = { kind: 'weapon', power: 3, equip: 'sword' };
+
+  it('自動では持ち替えず、確認が出る', () => {
+    const s = newGame('EQ1');
+    if (!stepOntoEquip(s, sword)) return;
+    expect(s.prompt?.kind).toBe('equip');
+    expect(s.weapon).toBeNull();
+    // 確認の間、床からは取り上げてある
+    expect(s.items).toHaveLength(0);
+  });
+
+  it('持ち替えると装備され、ターンは消費しない', () => {
+    const s = newGame('EQ2');
+    if (!stepOntoEquip(s, sword)) return;
+    const turnBefore = s.turn;
+    const r = step(s, { type: 'confirm' });
+    expect(r.acted).toBe(false);
+    expect(s.turn).toBe(turnBefore);
+    expect(s.weapon).toEqual({ id: 'sword', power: 3 });
+    expect(s.prompt).toBeNull();
+  });
+
+  it('今の装備は足元に落ちる', () => {
+    const s = newGame('EQ3');
+    s.weapon = { id: 'dagger', power: 2 };
+    if (!stepOntoEquip(s, sword)) return;
+    step(s, { type: 'confirm' });
+    const dropped = s.items.find((it) => it.equip === 'dagger');
+    expect(dropped).toBeDefined();
+    expect(dropped?.x).toBe(s.player.x);
+    expect(dropped?.y).toBe(s.player.y);
+  });
+
+  it('断ると床に戻り、印が付く', () => {
+    const s = newGame('EQ4');
+    if (!stepOntoEquip(s, sword)) return;
+    step(s, { type: 'cancel' });
+    expect(s.weapon).toBeNull();
+    expect(s.items).toHaveLength(1);
+    expect(s.items[0].declined).toBe(true);
+  });
+
+  it('断ったものを踏み直しても確認は出ない', () => {
+    const s = newGame('EQ5');
+    if (!stepOntoEquip(s, sword)) return;
+    step(s, { type: 'cancel' });
+    const item = s.items[0];
+    // 一度離れて、もう一度踏む
+    const away = neighborOf(s, s.player);
+    if (!away) return;
+    s.player.x = away.x;
+    s.player.y = away.y;
+    step(s, { type: 'move', dx: item.x - s.player.x, dy: item.y - s.player.y });
+    expect(s.prompt).toBeNull();
+  });
+
+  it('同じ部位を装備し直すと、床の印が外れる', () => {
+    const s = newGame('EQ6');
+    if (!stepOntoEquip(s, sword)) return;
+    step(s, { type: 'cancel' });
+    expect(s.items[0].declined).toBe(true);
+
+    // 別の武器を装備すると、断った印は外れる
+    s.items.push({ kind: 'weapon', power: 9, equip: 'axe', x: s.player.x, y: s.player.y });
+    const axe = s.items[s.items.length - 1];
+    s.items = s.items.filter((it) => it !== axe);
+    s.prompt = { kind: 'equip', item: axe };
+    step(s, { type: 'confirm' });
+
+    expect(s.weapon).toEqual({ id: 'axe', power: 9 });
+    expect(s.items.some((it) => it.equip === 'sword' && it.declined)).toBe(false);
+  });
+
+  it('ViewModel に装備の名前が出る', () => {
+    const s = newGame('EQ7');
+    expect(toViewModel(s).player.weapon).toBeNull();
+    s.weapon = { id: 'axe', power: 4 };
+    s.armor = { id: 'plate', power: 2 };
+    const vm = toViewModel(s);
+    expect(vm.player.weapon).toBe('斧 +4');
+    expect(vm.player.armor).toBe('板金鎧 +2');
+    // 攻撃力と防御力に補正が乗っている
+    expect(vm.player.atk).toBe(s.player.atk + 6);
+    expect(vm.player.def).toBe(4);
   });
 });
 

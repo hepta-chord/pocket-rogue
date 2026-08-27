@@ -61,6 +61,10 @@ export interface ViewModel {
     atk: number;
     /** 防具の値 */
     def: number;
+    /** 装備している武器の名前。素手なら null */
+    weapon: string | null;
+    /** 装備している防具の名前。裸なら null */
+    armor: string | null;
     level: number;
     xp: number;
     /** 次のレベルまでに必要な経験値 */

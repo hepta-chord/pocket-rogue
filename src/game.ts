@@ -15,11 +15,28 @@ import {
 import { MONSTER_ROLL_FLOOR, PLAYER_ROLL_FLOOR, applyDefense, strike } from './combat';
 import { computeFov } from './fov';
 import {
+  CRIT_CHANCE,
+  armorDefense,
+  armorEvasion,
+  armorHas,
+  equipDef,
+  equipName,
+  equipSummary,
+  weaponAccuracy,
+  type EquipSlot,
+  weaponAtk,
+  weaponHas,
+  type Equipped,
+} from './equip';
+import {
   CONSUMABLES,
-  ITEM_NAMES,
+  DROP_CHANCE,
   STACK_MAX,
   emptyInventory,
   isEquip,
+  itemLabel,
+  makeEquipItem,
+  pickDropEquip,
   spawnItems,
   type ConsumableKind,
   type Inventory,
@@ -43,7 +60,10 @@ export type Action =
  * 汎用の器を 1 つだけ持ち、階段と装備の両方から使う。
  * 確認が出ている間はゲームが止まり、confirm と cancel 以外の手を受け付けない。
  */
-export type Prompt = { kind: 'descend' };
+export type Prompt =
+  | { kind: 'descend' }
+  /** 拾った装備を身に着けるか。断ると床に戻る */
+  | { kind: 'equip'; item: Item };
 
 export interface StepResult {
   /** ターンが進んだか。壁にぶつかった・持っていないアイテムを使おうとした、なら false */
@@ -52,7 +72,7 @@ export interface StepResult {
   interrupt: boolean;
 }
 
-export const SAVE_VERSION = 8;
+export const SAVE_VERSION = 9;
 
 /**
  * 次のレベルまでに必要な経験値。
@@ -96,9 +116,9 @@ export interface GameState {
   inventory: Inventory;
   /** 確認待ち。null なら通常の操作を受け付ける */
   prompt: Prompt | null;
-  /** 装備の強さ。攻撃力と被ダメージ軽減に足す */
-  weapon: number;
-  armor: number;
+  /** 身に着けている装備。持っていなければ null */
+  weapon: Equipped | null;
+  armor: Equipped | null;
   /** 0/1。今見えている位置 */
   visible: number[];
   /** 0/1。一度でも見た位置 */
@@ -136,8 +156,8 @@ export function newGame(seed: string): GameState {
     items: [],
     inventory: emptyInventory(),
     prompt: null,
-    weapon: 0,
-    armor: 0,
+    weapon: null,
+    armor: null,
     visible: [],
     explored: [],
     log: [],
@@ -181,7 +201,7 @@ export function step(state: GameState, action: Action): StepResult {
   } else if (action.type === 'use') {
     if (state.inventory[action.item] <= 0) return none;
     state.inventory[action.item]--;
-    useItem(state, action.item);
+    useItem(state, rng, action.item);
     interrupt = true;
   }
 
@@ -189,7 +209,7 @@ export function step(state: GameState, action: Action): StepResult {
 
   // 階段は乗った瞬間ではなく、確認を挟んでから降りる。
   // 長押しの連続移動で踏んだときに問答無用で降りてしまうのを防ぐ。
-  if (!state.over && tileAt(state.map, p.x, p.y) === Tile.StairsDown) {
+  if (!state.over && !state.prompt && tileAt(state.map, p.x, p.y) === Tile.StairsDown) {
     state.prompt = { kind: 'descend' };
     interrupt = true;
   }
@@ -207,6 +227,11 @@ function answerPrompt(state: GameState, rng: Rng, action: Action): StepResult {
   if (!prompt) return { acted: false, interrupt: false };
 
   if (action.type === 'cancel') {
+    // 装備は床から取り上げてあるので、断られたら足元に戻す
+    if (prompt.kind === 'equip') {
+      state.items.push({ ...prompt.item, x: state.player.x, y: state.player.y, declined: true });
+      pushLog(state, 'info', `${itemLabel(prompt.item)} は置いていった。`);
+    }
     state.prompt = null;
     return { acted: false, interrupt: true };
   }
@@ -219,6 +244,51 @@ function answerPrompt(state: GameState, rng: Rng, action: Action): StepResult {
       // 降りる瞬間は敵に行動させない。階段への直行を逃走手段として残すための非対称である
       endTurn(state, rng, { enemies: false });
       return { acted: true, interrupt: true };
+
+    case 'equip':
+      equipItem(state, prompt.item);
+      // 持ち替えは足元での作業なので、ターンは消費させない
+      return { acted: false, interrupt: true };
+  }
+}
+
+/**
+ * 装備を身に着ける。今の装備はその場に落とす。
+ *
+ * 捨てるのではなく落とすことで、腐食した装備を拾い直すかどうかも判断として残る。
+ */
+function equipItem(state: GameState, item: Item): void {
+  if (!item.equip) return;
+  const slot = equipDef(item.equip).slot;
+  const current = slot === 'weapon' ? state.weapon : state.armor;
+  const next: Equipped = { id: item.equip, power: item.power };
+
+  if (current) {
+    // 外したものは足元に落とす。捨てるのではないので拾い直せる。
+    // 今それを選ばなかったのだから、印を付けて通行の邪魔にならないようにする
+    state.items.push({
+      kind: slot,
+      x: state.player.x,
+      y: state.player.y,
+      power: current.power,
+      equip: current.id,
+      declined: true,
+    });
+  }
+  if (slot === 'weapon') state.weapon = next;
+  else state.armor = next;
+  clearDeclined(state, slot);
+  pushLog(state, 'info', `${equipName(next)} を装備した。`);
+}
+
+/**
+ * その部位の「断った」印を外す。
+ * 装備が変わると比べる相手が変わるので、床のものをもう一度選べるようにする。
+ * 腐食で装備が弱ったときも、ここを通して選び直せるようにする。
+ */
+function clearDeclined(state: GameState, slot: EquipSlot): void {
+  for (const it of state.items) {
+    if (it.kind === slot && it.declined) delete it.declined;
   }
 }
 
@@ -229,6 +299,20 @@ export function promptText(state: GameState): { text: string; confirm: string; c
   switch (prompt.kind) {
     case 'descend':
       return { text: `B${state.depth + 1} に降りますか。`, confirm: '降りる', cancel: 'やめる' };
+
+    case 'equip': {
+      const item = prompt.item;
+      if (!item.equip) return null;
+      const slot = equipDef(item.equip).slot;
+      const current = slot === 'weapon' ? state.weapon : state.armor;
+      const found: Equipped = { id: item.equip, power: item.power };
+      return {
+        text: `${equipSummary(found, slot)}
+今: ${equipSummary(current, slot)}`,
+        confirm: '持ち替える',
+        cancel: '置いていく',
+      };
+    }
   }
 }
 
@@ -286,18 +370,15 @@ function pickUp(state: GameState): boolean {
   const i = state.items.findIndex((it) => it.x === p.x && it.y === p.y);
   if (i < 0) return false;
   const item = state.items[i];
-  const name = ITEM_NAMES[item.kind];
+  const name = itemLabel(item);
 
+  // 装備は自動で持ち替えない。拾った時点で選ばせる。
+  // 床から取り上げておき、断られたら戻す
   if (isEquip(item.kind)) {
-    const current = item.kind === 'weapon' ? state.weapon : state.armor;
-    if (item.power > current) {
-      if (item.kind === 'weapon') state.weapon = item.power;
-      else state.armor = item.power;
-      pushLog(state, 'info', `${name} +${item.power} を装備した。`);
-    } else {
-      pushLog(state, 'info', `${name} +${item.power} は今のより弱い。置いていった。`);
-    }
+    // 一度断ったものは、通るたびに確認を出さない
+    if (item.declined) return false;
     state.items.splice(i, 1);
+    state.prompt = { kind: 'equip', item };
     return true;
   }
 
@@ -312,7 +393,7 @@ function pickUp(state: GameState): boolean {
   return true;
 }
 
-function useItem(state: GameState, kind: ConsumableKind): void {
+function useItem(state: GameState, rng: Rng, kind: ConsumableKind): void {
   const p = state.player;
   switch (kind) {
     case 'potion': {
@@ -333,7 +414,10 @@ function useItem(state: GameState, kind: ConsumableKind): void {
       state.monsters = state.monsters.filter((m) => m.hp > 0);
       const tail = dead.length > 0 ? `${dead.length} 体を倒した。` : '';
       pushLog(state, 'player', `雷が ${targets.length} 体に ${dmg} のダメージ。${tail}`);
-      for (const m of dead) rewardKill(state, m);
+      for (const m of dead) {
+        rewardKill(state, m);
+        dropEquip(state, rng, m);
+      }
       return;
     }
     case 'map': {
@@ -392,25 +476,95 @@ function notifyDamage(e: DamageEvent): void {
   damageObserver?.(e);
 }
 
+/**
+ * プレイヤーの攻撃。
+ * 武器の特殊効果はここで分岐する。
+ */
 function playerAttack(state: GameState, rng: Rng, target: Actor): void {
+  const w = state.weapon;
+
+  // 群れ薙ぎ: 隣接する敵すべてに当たる。数で押してくる相手に効く
+  const targets = weaponHas(w, 'cleave') ? adjacentMonsters(state) : [target];
+  // 双牙: 2 回攻撃する
+  const swings = weaponHas(w, 'double') ? 2 : 1;
+
+  for (let i = 0; i < swings; i++) {
+    for (const m of targets) {
+      if (!state.monsters.includes(m)) continue;
+      strikeMonster(state, rng, m);
+    }
+  }
+}
+
+/** プレイヤーから 1 体への 1 回ぶん */
+function strikeMonster(state: GameState, rng: Rng, target: Actor): void {
   const p = state.player;
-  const hit = strike(rng, p.atk + state.weapon, target.def, PLAYER_ROLL_FLOOR);
+  const w = state.weapon;
+  const name = actorName(target.kind);
+
+  if (!rollHit(rng, weaponAccuracy(w), target.evasion, weaponHas(w, 'sureHit'))) {
+    pushLog(state, 'player', `${name}に攻撃を外した。`);
+    return;
+  }
+
+  // 鎧通しは常に、会心の刃は確率で防御力を無視する
+  const crit = weaponHas(w, 'crit') && rng.chance(CRIT_CHANCE);
+  const pierce = weaponHas(w, 'pierce') || crit;
+  const hit = strike(rng, p.atk + weaponAtk(w), target.def, PLAYER_ROLL_FLOOR, pierce);
+
   target.hp -= hit.dealt;
   notifyDamage({ to: 'monster', depth: state.depth, from: 'player', roll: hit.roll, dealt: hit.dealt });
   // 残り HP を出す。何発で倒せるかが読めないと、効いている感覚が出ない
   const rest = target.hp > 0 ? ` (残り ${target.hp})` : '';
-  pushLog(state, 'player', `${actorName(target.kind)}に ${hit.dealt} のダメージ${rest}。`);
+  const head = crit ? '会心の一撃! ' : '';
+  pushLog(state, 'player', `${head}${name}に ${hit.dealt} のダメージ${rest}。`);
+
   if (target.hp <= 0) {
-    killMonster(state, target);
+    killMonster(state, rng, target);
     return;
   }
-  if (hasPassive(target.kind, 'split')) trySplit(state, rng, target);
+  // 祓いの杖は分裂を止める
+  if (hasPassive(target.kind, 'split') && !weaponHas(state.weapon, 'ward')) {
+    trySplit(state, rng, target);
+  }
 }
 
-function killMonster(state: GameState, m: Actor): void {
+/**
+ * 当たったかどうか。
+ * 命中率と回避率は掛け算になるので、どちらも極端な値を置かないようにしてある。
+ */
+function rollHit(rng: Rng, accuracy: number, evasion: number, sureHit: boolean): boolean {
+  if (sureHit) return true;
+  return rng.chance(accuracy * (1 - evasion));
+}
+
+/** プレイヤーに隣接している敵。群れ薙ぎで使う */
+function adjacentMonsters(state: GameState): Actor[] {
+  const p = state.player;
+  return state.monsters.filter((m) => Math.max(Math.abs(m.x - p.x), Math.abs(m.y - p.y)) === 1);
+}
+
+function killMonster(state: GameState, rng: Rng, m: Actor): void {
   state.monsters = state.monsters.filter((x) => x.id !== m.id);
   pushLog(state, 'player', `${actorName(m.kind)}を倒した。`);
   rewardKill(state, m);
+  dropEquip(state, rng, m);
+}
+
+/**
+ * 倒した敵が装備を落とす。
+ * その系統に効く装備をその系統が落とすので、狩る対象が分散し、
+ * 戦うか避けるかの判断に装備の期待値が乗る。
+ */
+function dropEquip(state: GameState, rng: Rng, m: Actor): void {
+  const family = MONSTERS[m.kind as MonsterKind].family;
+  if (!rng.chance(DROP_CHANCE)) return;
+  if (state.items.some((it) => it.x === m.x && it.y === m.y)) return;
+  const id = pickDropEquip(rng, family);
+  if (!id) return;
+  const item = makeEquipItem(rng, id, state.depth, m.x, m.y);
+  state.items.push(item);
+  pushLog(state, 'info', `${itemLabel(item)} を落とした。`);
 }
 
 /** 撃破数・スコア・経験値をまとめて加算する。雷で倒したときもここを通す */
@@ -449,13 +603,34 @@ function gainXp(state: GameState, amount: number): void {
  */
 function monsterAttack(state: GameState, rng: Rng, m: Actor, opts: { pierce?: boolean; label?: string } = {}): void {
   const p = state.player;
-  const hit = strike(rng, m.atk, p.def + state.armor, MONSTER_ROLL_FLOOR, opts.pierce);
+  const a = state.armor;
+  const name = actorName(m.kind);
+
+  // 防具の回避。敵の命中率は持たせていないので、回避率がそのまま外れる確率になる
+  if (rng.chance(armorEvasion(a))) {
+    pushLog(state, 'enemy', `${name}の攻撃をかわした。`);
+    return;
+  }
+
+  const hit = strike(rng, m.atk, p.def + armorDefense(a), MONSTER_ROLL_FLOOR, opts.pierce);
   const reduced = hit.roll - hit.dealt;
   p.hp -= hit.dealt;
   notifyDamage({ to: 'player', depth: state.depth, from: m.kind, roll: hit.roll, dealt: hit.dealt });
-  const head = opts.label ?? `${actorName(m.kind)}から`;
+  const head = opts.label ?? `${name}から`;
   const note = reduced > 0 ? ` (防具で ${reduced} 軽減)` : '';
   pushLog(state, 'enemy', `${head} ${hit.dealt} のダメージ。${note}`);
+
+  // 棘鎧の反撃。高 HP で殴り合いになる重装に効く
+  if (armorHas(a, 'thorns') && p.hp > 0) thornsCounter(state, rng, m);
+}
+
+/** 反撃。受けたぶんではなく、防具の値に応じた固定の削りを返す */
+function thornsCounter(state: GameState, rng: Rng, m: Actor): void {
+  const back = Math.max(1, Math.ceil(armorDefense(state.armor) / 2));
+  m.hp -= back;
+  notifyDamage({ to: 'monster', depth: state.depth, from: 'player', roll: back, dealt: back });
+  pushLog(state, 'player', `棘が ${actorName(m.kind)}に ${back} 返した。`);
+  if (m.hp <= 0) killMonster(state, rng, m);
 }
 
 /** 分裂: 隣の空きマスに HP 半分の個体を置く。上限あり */
@@ -476,6 +651,7 @@ function trySplit(state: GameState, rng: Rng, m: Actor): void {
     maxHp: half,
     atk: m.atk,
     def: m.def,
+    evasion: m.evasion,
   };
   state.monsters.push(child);
   pushLog(state, 'enemy', `${actorName(m.kind)}が分裂した。`);
@@ -567,7 +743,7 @@ function tryAction(state: GameState, rng: Rng, m: Actor, kind: ActionKind, dist:
     case 'breath': {
       if (!sees || dist < 2 || dist > 4) return false;
       const roll = Math.floor(m.atk / 2) + state.depth;
-      const dmg = applyDefense(roll, p.def + state.armor);
+      const dmg = applyDefense(roll, p.def + armorDefense(state.armor));
       p.hp -= dmg;
       notifyDamage({ to: 'player', depth: state.depth, from: m.kind, roll, dealt: dmg });
       const note = roll - dmg > 0 ? ` (防具で ${roll - dmg} 軽減)` : '';
@@ -713,8 +889,10 @@ export function toViewModel(state: GameState): ViewModel {
       y: p.y,
       hp: p.hp,
       maxHp: p.maxHp,
-      atk: p.atk + state.weapon,
-      def: state.armor,
+      atk: p.atk + weaponAtk(state.weapon),
+      def: p.def + armorDefense(state.armor),
+      weapon: state.weapon ? equipName(state.weapon) : null,
+      armor: state.armor ? equipName(state.armor) : null,
       level: state.level,
       xp: state.xp,
       xpNext: xpToNext(state.level),

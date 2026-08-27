@@ -15,6 +15,14 @@ import {
   type DamageEvent,
   type GameState,
 } from '../game';
+import {
+  armorDefense,
+  armorEvasion,
+  equipDef,
+  weaponAccuracy,
+  weaponAtk,
+  type Equipped,
+} from '../equip';
 import { STACK_MAX, isEquip, type Item } from '../items';
 import { canStep, idx, isWalkable, Tile } from '../map';
 
@@ -159,8 +167,13 @@ export function seedList(count: number, prefix = 'SIM'): string[] {
 // 方針
 
 function decide(state: GameState, policy: Policy): Action {
-  // 確認が出ていたら、まずそれに答える。自動プレイは常に進む側を選ぶ
-  if (state.prompt) return { type: 'confirm' };
+  // 確認が出ていたら、まずそれに答える
+  if (state.prompt) {
+    if (state.prompt.kind === 'equip') {
+      return isUpgrade(state, state.prompt.item) ? { type: 'confirm' } : { type: 'cancel' };
+    }
+    return { type: 'confirm' };
+  }
 
   const p = state.player;
   const ratio = p.hp / p.maxHp;
@@ -197,12 +210,35 @@ function nearestItemStep(state: GameState, range: number): Action | null {
 /**
  * 拾って意味があるか。
  *
- * 所持上限に達した消耗品は踏んでも拾えず床に残る。
+ * 所持上限に達した消耗品と、持ち替えない装備は床に残る。
  * 除かないと、同じアイテムを目指して踏んでは離れるのを繰り返し、階から出られなくなる。
  */
 function canTake(state: GameState, item: Item): boolean {
-  if (isEquip(item.kind)) return true;
+  if (isEquip(item.kind)) return isUpgrade(state, item);
   return state.inventory[item.kind] < STACK_MAX;
+}
+
+/**
+ * 拾った装備が今のものより良いか。
+ *
+ * 自動プレイの判断なので厳密である必要はない。
+ * 武器は「攻撃力 × 命中率」、防具は「減算値 + 回避率の重み」で比べる。
+ */
+function isUpgrade(state: GameState, item: Item): boolean {
+  if (!item.equip) return false;
+  const found: Equipped = { id: item.equip, power: item.power };
+  if (equipDef(item.equip).slot === 'weapon') {
+    return weaponScore(found) > weaponScore(state.weapon);
+  }
+  return armorScore(found) > armorScore(state.armor);
+}
+
+function weaponScore(e: Equipped | null): number {
+  return weaponAtk(e) * weaponAccuracy(e);
+}
+
+function armorScore(e: Equipped | null): number {
+  return armorDefense(e) + armorEvasion(e) * 4;
 }
 
 function stepTowardStairs(state: GameState): Action | null {

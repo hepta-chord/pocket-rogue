@@ -37,6 +37,13 @@ body {
   touch-action: none;
 }
 
+/* 確認プロンプトの文面は 2 行組みなので、改行をそのまま出す */
+#confirm-text {
+  white-space: pre-line;
+  line-height: 1.6;
+  margin: 0 0 1rem;
+}
+
 /* 被弾したときに画面を短く赤く光らせる。ログを読まなくても被弾が分かるようにする */
 #app.hit::after {
   content: "";

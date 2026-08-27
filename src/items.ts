@@ -1,12 +1,22 @@
-import type { Actor } from './entity';
+import type { Actor, MonsterFamily } from './entity';
+import {
+  ARMORS,
+  ARMOR_IDS,
+  WEAPONS,
+  WEAPON_IDS,
+  equipDef,
+  type EquipId,
+  type EquipSlot,
+} from './equip';
 import { Tile, idx, type GameMap } from './map';
 import type { Rng } from './rng';
 
 // アイテムの定義と配置。
-// 操作性のため、使うアイテムは「対象指定が要らない消耗品」だけにし、装備は拾った時点で自動で持ち替える。
+// 操作性のため、使うアイテムは「対象指定が要らない消耗品」だけにしてある。
+// 装備は拾ったときに持ち替えるかどうかを選ぶ (game.ts の確認プロンプト)。
 
 export type ConsumableKind = 'potion' | 'thunder' | 'map';
-export type EquipKind = 'weapon' | 'armor';
+export type EquipKind = EquipSlot;
 export type ItemKind = ConsumableKind | EquipKind;
 
 export const CONSUMABLES: readonly ConsumableKind[] = ['potion', 'thunder', 'map'];
@@ -17,6 +27,15 @@ export interface Item {
   y: number;
   /** 装備の強さ (+n)。消耗品は 0 */
   power: number;
+  /** 装備のときだけ。どの種類か */
+  equip?: EquipId;
+  /**
+   * 一度断った装備。踏んでも確認を出さない。
+   *
+   * 断ったものが足元に残るので、印が無いと通るたびに確認が出て通行の邪魔になる。
+   * 同じ部位の装備が変わったときに印を外し、事情が変わったらまた選べるようにする。
+   */
+  declined?: boolean;
 }
 
 export type Inventory = Record<ConsumableKind, number>;
@@ -37,6 +56,25 @@ export const STACK_MAX = 5;
 const WEIGHTS: Record<ItemKind, number> = { potion: 5, thunder: 2, map: 2, weapon: 4, armor: 3 };
 const KINDS = Object.keys(WEIGHTS) as ItemKind[];
 
+/** 敵を倒したときに装備を落とす確率 */
+export const DROP_CHANCE = 0.16;
+
+/** ドロップのうち、系統に関係ない変わり種が出る割合 */
+const DROP_ODDITY_RATE = 0.2;
+
+export function emptyInventory(): Inventory {
+  return { potion: 0, thunder: 0, map: 0 };
+}
+
+export function isEquip(kind: ItemKind): kind is EquipKind {
+  return kind === 'weapon' || kind === 'armor';
+}
+
+/** 表示する名前。装備は種類と強さを出す */
+export function itemLabel(item: Item): string {
+  return item.equip ? `${equipDef(item.equip).name} +${item.power}` : ITEM_NAMES[item.kind];
+}
+
 /**
  * 装備の強さ。武器と防具で式を分ける。
  *
@@ -49,12 +87,41 @@ export function equipPower(kind: EquipKind, depth: number, rng: Rng): number {
     : 1 + Math.floor(depth / 4);
 }
 
-export function emptyInventory(): Inventory {
-  return { potion: 0, thunder: 0, map: 0 };
+/** 床に出る装備を 1 つ選ぶ。ドロップ限定のものは出ない */
+export function pickFloorEquip(rng: Rng, kind: EquipKind): EquipId {
+  const pool: EquipId[] =
+    kind === 'weapon'
+      ? WEAPON_IDS.filter((id) => !WEAPONS[id].dropOnly)
+      : ARMOR_IDS.filter((id) => !ARMORS[id].dropOnly);
+  return rng.pick(pool);
 }
 
-export function isEquip(kind: ItemKind): kind is EquipKind {
-  return kind === 'weapon' || kind === 'armor';
+/**
+ * 倒した敵が落とす装備を選ぶ。
+ *
+ * その系統に効く装備を、その系統が落とす。
+ * グレードが上がる階をまたいで効いてくるので、同じグレード内では手に入らず循環しない。
+ * 戦士だけが落とす形にすると戦士ばかり狩られるので、系統ごとに分ける意味がある。
+ */
+export function pickDropEquip(rng: Rng, family: MonsterFamily): EquipId | null {
+  const oddities: EquipId[] = [
+    ...WEAPON_IDS.filter((id) => WEAPONS[id].dropOnly),
+    ...ARMOR_IDS.filter((id) => ARMORS[id].dropOnly),
+  ];
+  if (rng.chance(DROP_ODDITY_RATE)) return rng.pick(oddities);
+
+  const matched: EquipId[] = [
+    ...WEAPON_IDS.filter((id) => WEAPONS[id].bane === family),
+    ...ARMOR_IDS.filter((id) => ARMORS[id].bane === family),
+  ];
+  if (matched.length === 0) return oddities.length > 0 ? rng.pick(oddities) : null;
+  return rng.pick(matched);
+}
+
+/** 装備 1 点ぶんの床アイテムを作る */
+export function makeEquipItem(rng: Rng, id: EquipId, depth: number, x: number, y: number): Item {
+  const slot = equipDef(id).slot;
+  return { kind: slot, x, y, power: equipPower(slot, depth, rng), equip: id };
 }
 
 /** 階層ごとに 2〜4 個。装備の強さは階が深いほど上がる */
@@ -65,8 +132,11 @@ export function spawnItems(rng: Rng, map: GameMap, depth: number, avoid: { x: nu
     const kind = weightedPick(rng);
     const pos = findSpot(rng, map, avoid, actors, items);
     if (!pos) break;
-    const power = isEquip(kind) ? equipPower(kind, depth, rng) : 0;
-    items.push({ kind, x: pos.x, y: pos.y, power });
+    if (isEquip(kind)) {
+      items.push(makeEquipItem(rng, pickFloorEquip(rng, kind), depth, pos.x, pos.y));
+    } else {
+      items.push({ kind, x: pos.x, y: pos.y, power: 0 });
+    }
   }
   return items;
 }
