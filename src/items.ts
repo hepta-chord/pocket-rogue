@@ -32,8 +32,22 @@ export const ITEM_NAMES: Record<ItemKind, string> = {
 /** 同じ消耗品を持てる上限 */
 export const STACK_MAX = 5;
 
-const WEIGHTS: Record<ItemKind, number> = { potion: 5, thunder: 2, map: 2, weapon: 2, armor: 2 };
+// 攻撃力がレベルで伸びなくなったぶん、武器の引きが勝敗に直結する。
+// 武器の重みを上げて、1 個あたりの重みを下げる。
+const WEIGHTS: Record<ItemKind, number> = { potion: 5, thunder: 2, map: 2, weapon: 4, armor: 3 };
 const KINDS = Object.keys(WEIGHTS) as ItemKind[];
+
+/**
+ * 装備の強さ。武器と防具で式を分ける。
+ *
+ * 武器の +1 はダメージの上限が 1 増えるだけだが、防具の +1 は被弾がすべて 1 減る。
+ * 同じ式で伸ばすと防具だけが効きすぎるので、防具は伸びを鈍らせる。
+ */
+export function equipPower(kind: EquipKind, depth: number, rng: Rng): number {
+  return kind === 'weapon'
+    ? 1 + Math.floor(depth / 3) + rng.int(0, 1)
+    : 1 + Math.floor(depth / 4);
+}
 
 export function emptyInventory(): Inventory {
   return { potion: 0, thunder: 0, map: 0 };
@@ -51,7 +65,7 @@ export function spawnItems(rng: Rng, map: GameMap, depth: number, avoid: { x: nu
     const kind = weightedPick(rng);
     const pos = findSpot(rng, map, avoid, actors, items);
     if (!pos) break;
-    const power = isEquip(kind) ? 1 + Math.floor(depth / 3) + rng.int(0, 1) : 0;
+    const power = isEquip(kind) ? equipPower(kind, depth, rng) : 0;
     items.push({ kind, x: pos.x, y: pos.y, power });
   }
   return items;

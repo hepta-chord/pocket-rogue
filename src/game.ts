@@ -12,6 +12,7 @@ import {
   type MonsterDef,
   type MonsterKind,
 } from './entity';
+import { MONSTER_ROLL_FLOOR, PLAYER_ROLL_FLOOR, applyDefense, strike } from './combat';
 import { computeFov } from './fov';
 import {
   CONSUMABLES,
@@ -40,7 +41,7 @@ export interface StepResult {
   interrupt: boolean;
 }
 
-export const SAVE_VERSION = 5;
+export const SAVE_VERSION = 6;
 
 /** 次のレベルまでに必要な経験値 */
 export function xpToNext(level: number): number {
@@ -329,12 +330,12 @@ function notifyDamage(e: DamageEvent): void {
 
 function playerAttack(state: GameState, rng: Rng, target: Actor): void {
   const p = state.player;
-  const dmg = rng.int(1, p.atk + state.weapon);
-  target.hp -= dmg;
-  notifyDamage({ to: 'monster', depth: state.depth, from: 'player', roll: dmg, dealt: dmg });
+  const hit = strike(rng, p.atk + state.weapon, target.def, PLAYER_ROLL_FLOOR);
+  target.hp -= hit.dealt;
+  notifyDamage({ to: 'monster', depth: state.depth, from: 'player', roll: hit.roll, dealt: hit.dealt });
   // 残り HP を出す。何発で倒せるかが読めないと、効いている感覚が出ない
   const rest = target.hp > 0 ? ` (残り ${target.hp})` : '';
-  pushLog(state, 'player', `${actorName(target.kind)}に ${dmg} のダメージ${rest}。`);
+  pushLog(state, 'player', `${actorName(target.kind)}に ${hit.dealt} のダメージ${rest}。`);
   if (target.hp <= 0) {
     killMonster(state, target);
     return;
@@ -359,6 +360,9 @@ function rewardKill(state: GameState, m: Actor): void {
 /**
  * 経験値を加算し、足りていればレベルを上げる。
  * レベルアップで実 HP も増えるので、戦うこと自体が回復を兼ねる (自然回復が無いぶんの埋め合わせ)。
+ *
+ * 攻撃力はレベルでは伸びない。武器で決まる。
+ * レベルと装備の両方で伸ばすと、深層で攻撃力だけが青天井になって難易度が頭打ちになる。
  */
 function gainXp(state: GameState, amount: number): void {
   const p = state.player;
@@ -368,30 +372,24 @@ function gainXp(state: GameState, amount: number): void {
     state.level++;
     p.maxHp += LEVEL_HP;
     p.hp += LEVEL_HP;
-    if (state.level % 2 === 0) {
-      p.atk += 1;
-      pushLog(state, 'player', `レベル ${state.level} になった。最大 HP と攻撃力が上がった。`);
-    } else {
-      pushLog(state, 'player', `レベル ${state.level} になった。最大 HP が上がった。`);
-    }
+    pushLog(state, 'player', `レベル ${state.level} になった。最大 HP が上がった。`);
   }
 }
 
 /**
  * 敵からプレイヤーへの攻撃。
- * 防具は被ダメージを減らすが、最低 1 は通る (序盤の防具で弱い敵が無害になるのを防ぐ)。
+ * 防具は被ダメージを減らすが、出目の 1/4 は必ず通る (防具で被弾が 1 に潰れるのを防ぐ)。
  * pierce のときは防具を無視する。
  */
 function monsterAttack(state: GameState, rng: Rng, m: Actor, opts: { pierce?: boolean; label?: string } = {}): void {
   const p = state.player;
-  const roll = rng.int(1, m.atk);
-  const dmg = opts.pierce ? roll : Math.max(1, roll - state.armor);
-  const reduced = roll - dmg;
-  p.hp -= dmg;
-  notifyDamage({ to: 'player', depth: state.depth, from: m.kind, roll, dealt: dmg });
+  const hit = strike(rng, m.atk, p.def + state.armor, MONSTER_ROLL_FLOOR, opts.pierce);
+  const reduced = hit.roll - hit.dealt;
+  p.hp -= hit.dealt;
+  notifyDamage({ to: 'player', depth: state.depth, from: m.kind, roll: hit.roll, dealt: hit.dealt });
   const head = opts.label ?? `${actorName(m.kind)}から`;
   const note = reduced > 0 ? ` (防具で ${reduced} 軽減)` : '';
-  pushLog(state, 'enemy', `${head} ${dmg} のダメージ。${note}`);
+  pushLog(state, 'enemy', `${head} ${hit.dealt} のダメージ。${note}`);
 }
 
 /** 分裂: 隣の空きマスに HP 半分の個体を置く。上限あり */
@@ -403,7 +401,16 @@ function trySplit(state: GameState, rng: Rng, m: Actor): void {
   const spot = freeNeighbor(state, m.x, m.y, rng, false);
   if (!spot) return;
   m.hp -= half;
-  const child: Actor = { id: state.nextId++, kind: m.kind, x: spot.x, y: spot.y, hp: half, maxHp: half, atk: m.atk };
+  const child: Actor = {
+    id: state.nextId++,
+    kind: m.kind,
+    x: spot.x,
+    y: spot.y,
+    hp: half,
+    maxHp: half,
+    atk: m.atk,
+    def: m.def,
+  };
   state.monsters.push(child);
   pushLog(state, 'enemy', `${actorName(m.kind)}が分裂した。`);
 }
@@ -494,7 +501,7 @@ function tryAction(state: GameState, rng: Rng, m: Actor, kind: ActionKind, dist:
     case 'breath': {
       if (!sees || dist < 2 || dist > 4) return false;
       const roll = Math.floor(m.atk / 2) + state.depth;
-      const dmg = Math.max(1, roll - state.armor);
+      const dmg = applyDefense(roll, p.def + state.armor);
       p.hp -= dmg;
       notifyDamage({ to: 'player', depth: state.depth, from: m.kind, roll, dealt: dmg });
       const note = roll - dmg > 0 ? ` (防具で ${roll - dmg} 軽減)` : '';
