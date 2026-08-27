@@ -41,8 +41,32 @@ export interface MonsterAction {
   chance: number;
 }
 
+/**
+ * 系統。敵を役割で畳んだ分類で、装備の系統特効が効く相手を決める軸になる。
+ * - swarm 群れ: 1 体は弱く数で押す
+ * - swift 俊敏: 速い、逃げられない
+ * - warrior 戦士: 素直に強い、装備を落とす
+ * - odd 変則: 通常の戦い方が通じない
+ * - heavy 重装: 高 HP、鈍足、再生
+ * - boss ボス: 階を代表する 1 体
+ *
+ * 今は分類を持たせるだけで、効果はまだ何にも繋がっていない。
+ * 装備の系統特効とグレード変種が、この軸を参照して入る。
+ */
+export type MonsterFamily = 'swarm' | 'swift' | 'warrior' | 'odd' | 'heavy' | 'boss';
+
+export const FAMILY_NAMES: Record<MonsterFamily, string> = {
+  swarm: '群れ',
+  swift: '俊敏',
+  warrior: '戦士',
+  odd: '変則',
+  heavy: '重装',
+  boss: 'ボス',
+};
+
 export interface MonsterDef {
   name: string;
+  family: MonsterFamily;
   hp: number;
   atk: number;
   /** 倒したときの経験値。スコアの撃破点にも同じ値を使う */
@@ -66,15 +90,15 @@ const ANY = 99;
 // 敵の定義表。新しい敵はここに 1 行足せば出る。
 // スライムの経験値が低いのは、分裂で 1 匹から何度も倒せるため (稼ぎ場にならないように抑えている)。
 export const MONSTERS: Record<MonsterKind, MonsterDef> = {
-  rat: { name: 'ネズミ', hp: 3, atk: 1, xp: 1, minDepth: 1, maxDepth: 4, weight: 5, maxPerFloor: ANY, pack: [2, 3], passives: [] },
-  bat: { name: 'コウモリ', hp: 4, atk: 2, xp: 2, minDepth: 1, maxDepth: 6, weight: 3, maxPerFloor: ANY, pack: [1, 1], passives: ['fast', 'erratic'] },
-  goblin: { name: 'ゴブリン', hp: 6, atk: 2, xp: 4, minDepth: 2, maxDepth: 8, weight: 4, maxPerFloor: ANY, pack: [1, 1], passives: [], action: { kind: 'doubleAttack', chance: 0.3 } },
-  slime: { name: 'スライム', hp: 8, atk: 2, xp: 2, minDepth: 3, maxDepth: 7, weight: 3, maxPerFloor: 2, pack: [1, 1], passives: ['split'] },
-  orc: { name: 'オーク', hp: 12, atk: 4, xp: 9, minDepth: 4, maxDepth: ANY, weight: 3, maxPerFloor: ANY, pack: [1, 1], passives: [] },
-  ghost: { name: '幽霊', hp: 8, atk: 3, xp: 8, minDepth: 5, maxDepth: ANY, weight: 2, maxPerFloor: ANY, pack: [1, 1], passives: ['phasing'] },
-  troll: { name: 'トロル', hp: 18, atk: 5, xp: 16, minDepth: 6, maxDepth: ANY, weight: 2, maxPerFloor: ANY, pack: [1, 1], passives: ['regen', 'slow'], action: { kind: 'smash', chance: 0.25 } },
-  wolf: { name: '狼', hp: 10, atk: 4, xp: 11, minDepth: 7, maxDepth: ANY, weight: 3, maxPerFloor: ANY, pack: [1, 1], passives: ['fast'], action: { kind: 'leap', chance: 0.4 } },
-  dragon: { name: 'ドラゴン', hp: 30, atk: 8, xp: 40, minDepth: 9, maxDepth: ANY, weight: 1, maxPerFloor: 1, pack: [1, 1], passives: [], action: { kind: 'breath', chance: 0.3 } },
+  rat: { name: 'ネズミ', family: 'swarm', hp: 3, atk: 1, xp: 1, minDepth: 1, maxDepth: 4, weight: 5, maxPerFloor: ANY, pack: [2, 3], passives: [] },
+  bat: { name: 'コウモリ', family: 'swift', hp: 4, atk: 2, xp: 2, minDepth: 1, maxDepth: 6, weight: 3, maxPerFloor: ANY, pack: [1, 1], passives: ['fast', 'erratic'] },
+  goblin: { name: 'ゴブリン', family: 'warrior', hp: 6, atk: 2, xp: 4, minDepth: 2, maxDepth: 8, weight: 4, maxPerFloor: ANY, pack: [1, 1], passives: [], action: { kind: 'doubleAttack', chance: 0.3 } },
+  slime: { name: 'スライム', family: 'odd', hp: 8, atk: 2, xp: 2, minDepth: 3, maxDepth: 7, weight: 3, maxPerFloor: 2, pack: [1, 1], passives: ['split'] },
+  orc: { name: 'オーク', family: 'warrior', hp: 12, atk: 4, xp: 9, minDepth: 4, maxDepth: ANY, weight: 3, maxPerFloor: ANY, pack: [1, 1], passives: [] },
+  ghost: { name: '幽霊', family: 'odd', hp: 8, atk: 3, xp: 8, minDepth: 5, maxDepth: ANY, weight: 2, maxPerFloor: ANY, pack: [1, 1], passives: ['phasing'] },
+  troll: { name: 'トロル', family: 'heavy', hp: 18, atk: 5, xp: 16, minDepth: 6, maxDepth: ANY, weight: 2, maxPerFloor: ANY, pack: [1, 1], passives: ['regen', 'slow'], action: { kind: 'smash', chance: 0.25 } },
+  wolf: { name: '狼', family: 'swift', hp: 10, atk: 4, xp: 11, minDepth: 7, maxDepth: ANY, weight: 3, maxPerFloor: ANY, pack: [1, 1], passives: ['fast'], action: { kind: 'leap', chance: 0.4 } },
+  dragon: { name: 'ドラゴン', family: 'boss', hp: 30, atk: 8, xp: 40, minDepth: 9, maxDepth: ANY, weight: 1, maxPerFloor: 1, pack: [1, 1], passives: [], action: { kind: 'breath', chance: 0.3 } },
 };
 
 /** 分裂で増えるスライムの上限 (1 階あたり) */
@@ -82,6 +106,10 @@ export const SLIME_CAP = 4;
 
 export function monsterDef(kind: ActorKind): MonsterDef | null {
   return kind === 'player' ? null : MONSTERS[kind];
+}
+
+export function familyOf(kind: ActorKind): MonsterFamily | null {
+  return monsterDef(kind)?.family ?? null;
 }
 
 export function hasPassive(kind: ActorKind, p: Passive): boolean {
