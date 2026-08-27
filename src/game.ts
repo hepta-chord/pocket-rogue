@@ -155,23 +155,36 @@ export function step(state: GameState, action: Action): StepResult {
   }
 
   if (tileAt(state.map, p.x, p.y) === Tile.StairsDown) {
-    state.turn++;
     descend(state, rng);
+    // 降りる瞬間は敵に行動させない。階段への直行を逃走手段として残すための非対称である
+    endTurn(state, rng, { enemies: false });
     state.rngState = rng.state;
     return { acted: true, interrupt: true };
   }
 
-  monstersAct(state, rng);
+  endTurn(state, rng, { enemies: true });
+  state.rngState = rng.state;
+  return { acted: true, interrupt };
+}
+
+/**
+ * ターンの終わりに必ず通る処理。
+ *
+ * 経路が階段と通常の 2 つに割れていると、片方だけ処理が漏れる。
+ * これから足すスタミナの消費、スタミナがある間の自然回復、フロア内ターン数、
+ * 追加の湧き、追跡者の出現判定は、すべてここに乗せる。
+ */
+function endTurn(state: GameState, rng: Rng, opts: { enemies: boolean }): void {
+  if (opts.enemies) monstersAct(state, rng);
   state.turn++;
   updateFov(state);
 
+  const p = state.player;
   if (p.hp <= 0) {
     p.hp = 0;
     state.over = true;
     pushLog(state, 'alert', `あなたは倒れた。B${state.depth} で ${state.kills} 体を倒した。`);
   }
-  state.rngState = rng.state;
-  return { acted: true, interrupt };
 }
 
 /** 今プレイヤーの視界にいる敵。連続移動の停止判定と雷の巻物に使う */
