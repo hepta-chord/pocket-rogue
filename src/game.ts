@@ -220,7 +220,7 @@ export function newGame(seed: string): GameState {
     xp: 0,
     score: 0,
     recorded: false,
-    map: { width: 0, height: 0, tiles: [], rooms: [] },
+    map: { width: 0, height: 0, tiles: [], rooms: [], links: [], stairsRoom: 0 },
     player: createPlayer(0, 0),
     monsters: [],
     items: [],

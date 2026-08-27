@@ -183,7 +183,7 @@ src/
   main.ts            起動。Renderer の選択、入力とループの接続
   game.ts            状態遷移 (1 ターン進める、戦闘、階層移動、死亡)。ViewModel を返す
   view.ts            描画層に渡すデータの型。見た目を含まない
-  map.ts             部屋 + 通路の生成
+  map.ts             部屋 + 通路の生成、経路の判定
   fov.ts             視界 (シャドウキャスティング)
   combat.ts          ダメージの計算式
   equip.ts           装備の定義と実効値

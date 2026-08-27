@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { Tile, canDetour, canStep, generateMap, idx, roomCenter, type GameMap } from './map';
+import {
+  Tile,
+  canDetour,
+  canStep,
+  deadEndRooms,
+  generateMap,
+  idx,
+  roomDegrees,
+  roomCenter,
+  type GameMap,
+} from './map';
 import { Rng, hashSeed } from './rng';
 
 const W = 40;
@@ -38,6 +48,8 @@ describe('canStep', () => {
     height: rows.length,
     tiles: rows.flatMap((r) => [...r].map((c) => (c === '#' ? Tile.Wall : Tile.Floor))),
     rooms: [],
+    links: [],
+    stairsRoom: 0,
   });
 
   it('直交の移動は制限しない', () => {
@@ -83,6 +95,8 @@ describe('canDetour', () => {
     height: rows.length,
     tiles: rows.flatMap((r) => [...r].map((c) => (c === '#' ? Tile.Wall : Tile.Floor))),
     rooms: [],
+    links: [],
+    stairsRoom: 0,
   });
 
   it('広い部屋なら 1 マス塞いでも回り道がある', () => {
@@ -141,5 +155,45 @@ describe('generateMap', () => {
 
   it('同じ seed なら同じ地形になる', () => {
     expect(build('SAME')).toEqual(build('SAME'));
+  });
+
+  it('すべての部屋が繋がっている', () => {
+    for (const s of seeds) {
+      const map = build(s);
+      const start = roomCenter(map.rooms[0]);
+      const reach = reachable(map, start);
+      for (const r of map.rooms) {
+        const c = roomCenter(r);
+        expect(reach.has(idx(map, c.x, c.y))).toBe(true);
+      }
+    }
+  });
+
+  it('接続の本数が部屋の数より 1 少ない (木になっている)', () => {
+    for (const s of seeds) {
+      const map = build(s);
+      expect(map.links).toHaveLength(map.rooms.length - 1);
+    }
+  });
+
+  it('階段は開始部屋ではない', () => {
+    for (const s of seeds) {
+      expect(build(s).stairsRoom).not.toBe(0);
+    }
+  });
+
+  it('行き止まりの部屋ができる', () => {
+    let withDeadEnd = 0;
+    for (const s of seeds) {
+      const map = build(s);
+      const ends = deadEndRooms(map);
+      // 開始部屋と階段部屋は除いてある
+      expect(ends).not.toContain(0);
+      expect(ends).not.toContain(map.stairsRoom);
+      for (const i of ends) expect(roomDegrees(map)[i]).toBe(1);
+      if (ends.length > 0) withDeadEnd++;
+    }
+    // 一本鎖だった頃は 0 件だった。過半数の階でできていれば配置先として使える
+    expect(withDeadEnd).toBeGreaterThan(seeds.length / 2);
   });
 });

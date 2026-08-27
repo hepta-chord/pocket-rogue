@@ -18,6 +18,14 @@ export interface GameMap {
   height: number;
   tiles: Tile[];
   rooms: Room[];
+  /**
+   * 部屋どうしの接続。部屋の添字の組。
+   * 枝の末端 (接続が 1 本だけの部屋) を行き止まりとして扱い、
+   * モンスターハウスのような「入らなければ安全」な部屋を置く場所に使う。
+   */
+  links: [number, number][];
+  /** 階段のある部屋の添字 */
+  stairsRoom: number;
 }
 
 export function idx(map: GameMap, x: number, y: number): number {
@@ -109,9 +117,14 @@ const MAX_ROOMS = 9;
 const ROOM_ATTEMPTS = 200;
 
 /**
- * 部屋 + 通路の古典的な生成。
- * 重ならない矩形をランダムに置き、直前の部屋の中心と L 字の通路で結ぶ。
- * 最後の部屋の中心に下り階段を置く。
+ * 部屋 + 通路の生成。
+ *
+ * 重ならない矩形をランダムに置き、**一番近い既存の部屋**と L 字の通路で結ぶ。
+ * 直前の部屋とだけ結ぶと接続が一本の鎖になり、端が 2 つしかできない。
+ * その 2 つは開始地点と階段で埋まるので、行き止まりの部屋が 1 つも生まれなかった。
+ * 近い部屋に繋ぐと枝分かれが自然に出るので、枝の末端が行き止まりになる。
+ *
+ * 階段は開始地点から最も遠い部屋に置く。
  */
 export function generateMap(rng: Rng, width: number, height: number): GameMap {
   for (;;) {
@@ -121,7 +134,14 @@ export function generateMap(rng: Rng, width: number, height: number): GameMap {
 }
 
 function tryGenerate(rng: Rng, width: number, height: number): GameMap {
-  const map: GameMap = { width, height, tiles: new Array<Tile>(width * height).fill(Tile.Wall), rooms: [] };
+  const map: GameMap = {
+    width,
+    height,
+    tiles: new Array<Tile>(width * height).fill(Tile.Wall),
+    rooms: [],
+    links: [],
+    stairsRoom: 0,
+  };
 
   for (let attempt = 0; attempt < ROOM_ATTEMPTS && map.rooms.length < MAX_ROOMS; attempt++) {
     const w = rng.int(4, 9);
@@ -132,18 +152,70 @@ function tryGenerate(rng: Rng, width: number, height: number): GameMap {
     if (map.rooms.some((r) => overlaps(r, room, 1))) continue;
 
     carveRoom(map, room);
-    if (map.rooms.length > 0) {
-      const prev = roomCenter(map.rooms[map.rooms.length - 1]);
-      carveCorridor(map, rng, prev, roomCenter(room));
+    const here = map.rooms.length;
+    if (here > 0) {
+      const near = nearestRoom(map.rooms, room);
+      carveCorridor(map, rng, roomCenter(map.rooms[near]), roomCenter(room));
+      map.links.push([near, here]);
     }
     map.rooms.push(room);
   }
 
   if (map.rooms.length > 0) {
-    const c = roomCenter(map.rooms[map.rooms.length - 1]);
+    map.stairsRoom = farthestRoom(map.rooms, 0);
+    const c = roomCenter(map.rooms[map.stairsRoom]);
     map.tiles[idx(map, c.x, c.y)] = Tile.StairsDown;
   }
   return map;
+}
+
+function centerDistance(a: Room, b: Room): number {
+  const ca = roomCenter(a);
+  const cb = roomCenter(b);
+  return Math.hypot(ca.x - cb.x, ca.y - cb.y);
+}
+
+function nearestRoom(rooms: Room[], to: Room): number {
+  let best = 0;
+  for (let i = 1; i < rooms.length; i++) {
+    if (centerDistance(rooms[i], to) < centerDistance(rooms[best], to)) best = i;
+  }
+  return best;
+}
+
+function farthestRoom(rooms: Room[], from: number): number {
+  let best = from === 0 ? 1 % rooms.length : 0;
+  for (let i = 0; i < rooms.length; i++) {
+    if (i === from) continue;
+    if (centerDistance(rooms[i], rooms[from]) > centerDistance(rooms[best], rooms[from])) best = i;
+  }
+  return best;
+}
+
+/** 部屋ごとの接続本数 */
+export function roomDegrees(map: GameMap): number[] {
+  const degrees = new Array<number>(map.rooms.length).fill(0);
+  for (const [a, b] of map.links) {
+    degrees[a]++;
+    degrees[b]++;
+  }
+  return degrees;
+}
+
+/**
+ * 行き止まりの部屋。接続が 1 本だけで、開始地点でも階段でもない部屋を返す。
+ *
+ * 「入らなければ安全、入れば報酬」という選択にできる場所であり、
+ * 階段までの経路上に置くと迂回できない仕掛けを、ここにだけ置く。
+ */
+export function deadEndRooms(map: GameMap): number[] {
+  const degrees = roomDegrees(map);
+  const out: number[] = [];
+  for (let i = 0; i < map.rooms.length; i++) {
+    if (i === 0 || i === map.stairsRoom) continue;
+    if (degrees[i] === 1) out.push(i);
+  }
+  return out;
 }
 
 function overlaps(a: Room, b: Room, margin: number): boolean {
