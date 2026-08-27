@@ -231,7 +231,8 @@ function showScores(): void {
 byId('menu-btn').addEventListener('click', () => {
   seedInput.value = state.seed;
   const vm = toViewModel(state);
-  byId('menu-equip').textContent = `装備: ${vm.player.weapon ?? '素手'} / ${vm.player.armor ?? '裸'}`;
+  byId('menu-equip').textContent = `${vm.player.weaponDetail}
+${vm.player.armorDetail}`;
   menu.showModal();
 });
 byId('seed-random').addEventListener('click', () => {

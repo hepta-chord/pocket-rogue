@@ -10,6 +10,7 @@ import {
   armorEvasion,
   armorHas,
   equipDef,
+  equipDetail,
   equipName,
   equipSummary,
   weaponAccuracy,
@@ -117,6 +118,38 @@ describe('実効値', () => {
     expect(equipSummary({ id: 'sword', power: 3 }, 'weapon')).toContain('攻撃 +3');
     expect(equipSummary(null, 'weapon')).toContain('素手');
     expect(equipSummary(null, 'armor')).toContain('裸');
+  });
+
+  it('特殊効果を持つ装備は説明にそれが出る', () => {
+    for (const id of ALL) {
+      const def = equipDef(id);
+      if (def.traits.length === 0) continue;
+      // 効果を持つのに説明が空だと、名前から推測するしかなくなる
+      expect(def.effect).not.toBe('');
+      expect(equipDetail({ id, power: 3 }, def.slot)).toContain(def.effect);
+    }
+  });
+
+  it('系統特効は効く相手が説明に出る', () => {
+    for (const id of ALL) {
+      const def = equipDef(id);
+      if (!def.bane) continue;
+      expect(equipDetail({ id, power: 3 }, def.slot)).toContain('に効く');
+    }
+  });
+
+  it('説明に数値と命中・回避が必ず入る', () => {
+    for (const id of ALL) {
+      const def = equipDef(id);
+      const detail = equipDetail({ id, power: 3 }, def.slot);
+      if (def.slot === 'weapon') {
+        expect(detail).toMatch(/攻撃 \+\d+/);
+        expect(detail).toMatch(/命中 \d+%/);
+      } else {
+        expect(detail).toMatch(/防御 \+\d+/);
+        expect(detail).toMatch(/回避 \d+%/);
+      }
+    }
   });
 });
 

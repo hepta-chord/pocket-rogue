@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { createMonster } from './entity';
 import type { FloorEffect } from './floors';
 import {
   SPELLS,
@@ -257,6 +258,34 @@ describe('確認プロンプト', () => {
     expect(s.player.y).toBe(before.y);
     expect(s.turn).toBe(before.turn);
     expect(s.prompt).not.toBeNull();
+  });
+
+  it('階段の上で戦っても確認は出ない', () => {
+    const s = newGame('PROMPT8');
+    if (!walkToStairs(s)) return;
+    step(s, { type: 'cancel' });
+
+    // 階段の上に立ったまま、隣に敵を置いて殴る
+    const spot = neighborOf(s, s.player);
+    if (!spot) return;
+    const m = createMonster('rat', 1, spot.x, spot.y, 99);
+    m.hp = 99;
+    m.maxHp = 99;
+    s.monsters = [m];
+    for (let i = 0; i < 3; i++) {
+      step(s, { type: 'move', dx: m.x - s.player.x, dy: m.y - s.player.y });
+      expect(s.prompt).toBeNull();
+    }
+  });
+
+  it('階段の上でアイテムを使っても確認は出ない', () => {
+    const s = newGame('PROMPT9');
+    if (!walkToStairs(s)) return;
+    step(s, { type: 'cancel' });
+    s.inventory.potion = 1;
+    s.player.hp = 1;
+    step(s, { type: 'use', item: 'potion' });
+    expect(s.prompt).toBeNull();
   });
 
   it('取り消したあと、待機で確認をやり直せる', () => {

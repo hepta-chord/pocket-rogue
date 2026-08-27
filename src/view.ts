@@ -86,6 +86,9 @@ export interface ViewModel {
     weapon: string | null;
     /** 装備している防具の名前。裸なら null */
     armor: string | null;
+    /** 装備の名前と性能。2 行組みで、そのまま出せば読める */
+    weaponDetail: string;
+    armorDetail: string;
     level: number;
     xp: number;
     /** 次のレベルまでに必要な経験値 */

@@ -10,7 +10,7 @@
 //
 // 深さから決まる強さ (items.ts の equipPower) に、ここの補正が乗る。
 
-import type { MonsterFamily } from './entity';
+import { FAMILY_NAMES, type MonsterFamily } from './entity';
 
 export type EquipSlot = 'weapon' | 'armor';
 
@@ -65,6 +65,11 @@ interface EquipDefBase {
   bane: MonsterFamily | null;
   /** 床には出ず、敵のドロップでしか手に入らない */
   dropOnly: boolean;
+  /**
+   * 特殊効果の 1 行説明。数値で読み取れるものは書かない。
+   * 名前から推測させないために、拾ったときとメニューでそのまま出す。
+   */
+  effect: string;
 }
 
 export interface WeaponDef extends EquipDefBase {
@@ -95,39 +100,39 @@ export const CRIT_CHANCE = 0.25;
 
 export const WEAPONS: Record<WeaponId, WeaponDef> = {
   // 基礎 3 種。命中重視、標準、攻撃重視で、どれかが上位互換にならないようにしてある
-  dagger: { slot: 'weapon', name: '短剣', bane: null, dropOnly: false, atkBonus: -1, accuracy: 0.95, traits: [] },
-  sword: { slot: 'weapon', name: '剣', bane: null, dropOnly: false, atkBonus: 0, accuracy: 0.85, traits: [] },
-  axe: { slot: 'weapon', name: '斧', bane: null, dropOnly: false, atkBonus: 2, accuracy: 0.7, traits: [] },
+  dagger: { slot: 'weapon', name: '短剣', bane: null, dropOnly: false, effect: '', atkBonus: -1, accuracy: 0.95, traits: [] },
+  sword: { slot: 'weapon', name: '剣', bane: null, dropOnly: false, effect: '', atkBonus: 0, accuracy: 0.85, traits: [] },
+  axe: { slot: 'weapon', name: '斧', bane: null, dropOnly: false, effect: '', atkBonus: 2, accuracy: 0.7, traits: [] },
 
   // 系統特効 5 種。名前に対象が入るようにしてある
-  swarmBlade: { slot: 'weapon', name: '群れ薙ぎ', bane: 'swarm', dropOnly: false, atkBonus: -1, accuracy: 0.85, traits: ['cleave'] },
-  swiftSpear: { slot: 'weapon', name: '韋駄天突き', bane: 'swift', dropOnly: false, atkBonus: 0, accuracy: 1, traits: ['sureHit'] },
-  armorPiercer: { slot: 'weapon', name: '鎧通し', bane: 'warrior', dropOnly: false, atkBonus: -1, accuracy: 0.85, traits: ['pierce'] },
-  wardStaff: { slot: 'weapon', name: '祓いの杖', bane: 'odd', dropOnly: false, atkBonus: -1, accuracy: 0.9, traits: ['ward'] },
+  swarmBlade: { slot: 'weapon', name: '群れ薙ぎ', bane: 'swarm', dropOnly: false, effect: '隣接する敵すべてに同時に当たる', atkBonus: -1, accuracy: 0.85, traits: ['cleave'] },
+  swiftSpear: { slot: 'weapon', name: '韋駄天突き', bane: 'swift', dropOnly: false, effect: '必ず当たる。相手の回避を無視する', atkBonus: 0, accuracy: 1, traits: ['sureHit'] },
+  armorPiercer: { slot: 'weapon', name: '鎧通し', bane: 'warrior', dropOnly: false, effect: '相手の防御力を無視する', atkBonus: -1, accuracy: 0.85, traits: ['pierce'] },
+  wardStaff: { slot: 'weapon', name: '祓いの杖', bane: 'odd', dropOnly: false, effect: '分裂を止める', atkBonus: -1, accuracy: 0.9, traits: ['ward'] },
   // 重装への特効は「攻撃力が高く、再生量を上回る」ことそのものなので、特殊効果は持たせない
-  greatHammer: { slot: 'weapon', name: '大槌', bane: 'heavy', dropOnly: false, atkBonus: 3, accuracy: 0.65, traits: [] },
+  greatHammer: { slot: 'weapon', name: '大槌', bane: 'heavy', dropOnly: false, effect: '一撃が重く、再生を上回る', atkBonus: 3, accuracy: 0.65, traits: [] },
 
   // ドロップ限定
-  critEdge: { slot: 'weapon', name: '会心の刃', bane: null, dropOnly: true, atkBonus: 0, accuracy: 0.85, traits: ['crit'] },
-  twinFang: { slot: 'weapon', name: '双牙', bane: null, dropOnly: true, atkBonus: -2, accuracy: 0.8, traits: ['double'] },
+  critEdge: { slot: 'weapon', name: '会心の刃', bane: null, dropOnly: true, effect: '25% で防御力を無視する', atkBonus: 0, accuracy: 0.85, traits: ['crit'] },
+  twinFang: { slot: 'weapon', name: '双牙', bane: null, dropOnly: true, effect: '1 手で 2 回攻撃する', atkBonus: -2, accuracy: 0.8, traits: ['double'] },
 };
 
 export const ARMORS: Record<ArmorId, ArmorDef> = {
   // 基礎 3 種
-  leather: { slot: 'armor', name: '革鎧', bane: null, dropOnly: false, defBonus: -1, evasion: 0.12, traits: [] },
-  chain: { slot: 'armor', name: '鎖帷子', bane: null, dropOnly: false, defBonus: 0, evasion: 0.05, traits: [] },
-  plate: { slot: 'armor', name: '板金鎧', bane: null, dropOnly: false, defBonus: 2, evasion: 0, traits: [] },
+  leather: { slot: 'armor', name: '革鎧', bane: null, dropOnly: false, effect: '', defBonus: -1, evasion: 0.12, traits: [] },
+  chain: { slot: 'armor', name: '鎖帷子', bane: null, dropOnly: false, effect: '', defBonus: 0, evasion: 0.05, traits: [] },
+  plate: { slot: 'armor', name: '板金鎧', bane: null, dropOnly: false, effect: '', defBonus: 2, evasion: 0, traits: [] },
 
   // 系統特効 5 種
-  swarmGuard: { slot: 'armor', name: '群れよけの盾', bane: 'swarm', dropOnly: false, defBonus: 0, evasion: 0.05, traits: ['guard'] },
-  windCloak: { slot: 'armor', name: '疾風の外套', bane: 'swift', dropOnly: false, defBonus: -1, evasion: 0.2, traits: [] },
-  warBreaker: { slot: 'armor', name: '戦士殺しの鎧', bane: 'warrior', dropOnly: false, defBonus: 2, evasion: 0, traits: [] },
-  wardCharm: { slot: 'armor', name: '変則よけの護符', bane: 'odd', dropOnly: false, defBonus: 0, evasion: 0.05, traits: ['wardCorrosion'] },
-  thornMail: { slot: 'armor', name: '棘鎧', bane: 'heavy', dropOnly: false, defBonus: 1, evasion: 0, traits: ['thorns'] },
+  swarmGuard: { slot: 'armor', name: '群れよけの盾', bane: 'swarm', dropOnly: false, effect: '被弾でスタミナが減らない', defBonus: 0, evasion: 0.05, traits: ['guard'] },
+  windCloak: { slot: 'armor', name: '疾風の外套', bane: 'swift', dropOnly: false, effect: '', defBonus: -1, evasion: 0.2, traits: [] },
+  warBreaker: { slot: 'armor', name: '戦士殺しの鎧', bane: 'warrior', dropOnly: false, effect: '', defBonus: 2, evasion: 0, traits: [] },
+  wardCharm: { slot: 'armor', name: '変則よけの護符', bane: 'odd', dropOnly: false, effect: '腐食を防ぐ', defBonus: 0, evasion: 0.05, traits: ['wardCorrosion'] },
+  thornMail: { slot: 'armor', name: '棘鎧', bane: 'heavy', dropOnly: false, effect: '近接攻撃を受けると反撃する', defBonus: 1, evasion: 0, traits: ['thorns'] },
 
   // ドロップ限定
-  shadowVeil: { slot: 'armor', name: '影衣', bane: null, dropOnly: true, defBonus: -2, evasion: 0.28, traits: [] },
-  adamantMail: { slot: 'armor', name: '金剛の鎧', bane: null, dropOnly: true, defBonus: 4, evasion: 0, traits: [] },
+  shadowVeil: { slot: 'armor', name: '影衣', bane: null, dropOnly: true, effect: '', defBonus: -2, evasion: 0.28, traits: [] },
+  adamantMail: { slot: 'armor', name: '金剛の鎧', bane: null, dropOnly: true, effect: '', defBonus: 4, evasion: 0, traits: [] },
 };
 
 export const WEAPON_IDS = Object.keys(WEAPONS) as WeaponId[];
@@ -182,13 +187,34 @@ export function armorHas(e: Equipped | null, trait: ArmorTrait): boolean {
   return e ? (equipDef(e.id) as ArmorDef).traits.includes(trait) : false;
 }
 
-/** 確認プロンプトに出す 1 行の説明 */
-export function equipSummary(e: Equipped | null, slot: EquipSlot): string {
-  if (!e) return slot === 'weapon' ? `素手 (攻撃 +0, 命中 ${pct(BARE_ACCURACY)})` : '裸 (防御 +0, 回避 0%)';
+/** 名前と強さ。装備していないときは素手・裸 */
+export function equipHeadline(e: Equipped | null, slot: EquipSlot): string {
+  if (!e) return slot === 'weapon' ? '素手' : '裸';
+  return equipName(e);
+}
+
+/**
+ * 性能を並べた 1 行。
+ * 名前から効果を推測させないために、数値と特殊効果と効く系統をここに全部出す。
+ */
+export function equipDetail(e: Equipped | null, slot: EquipSlot): string {
+  if (!e) {
+    return slot === 'weapon' ? `攻撃 +0 / 命中 ${pct(BARE_ACCURACY)}` : '防御 +0 / 回避 0%';
+  }
   const def = equipDef(e.id);
-  return def.slot === 'weapon'
-    ? `${equipName(e)} (攻撃 +${weaponAtk(e)}, 命中 ${pct(def.accuracy)})`
-    : `${equipName(e)} (防御 +${armorDefense(e)}, 回避 ${pct(def.evasion)})`;
+  const parts =
+    def.slot === 'weapon'
+      ? [`攻撃 +${weaponAtk(e)}`, `命中 ${pct(def.accuracy)}`]
+      : [`防御 +${armorDefense(e)}`, `回避 ${pct(def.evasion)}`];
+  if (def.bane) parts.push(`${FAMILY_NAMES[def.bane]}に効く`);
+  if (def.effect) parts.push(def.effect);
+  return parts.join(' / ');
+}
+
+/** 見出しと性能を 2 行で返す */
+export function equipSummary(e: Equipped | null, slot: EquipSlot): string {
+  return `${equipHeadline(e, slot)}
+${equipDetail(e, slot)}`;
 }
 
 function pct(v: number): string {

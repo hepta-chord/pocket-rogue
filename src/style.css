@@ -37,7 +37,14 @@ body {
   touch-action: none;
 }
 
-/* 確認プロンプトの文面は 2 行組みなので、改行をそのまま出す */
+/* 装備の性能は複数行で出す */
+#menu-equip {
+  white-space: pre-line;
+  line-height: 1.6;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+}
+
+/* 確認プロンプトの文面は複数行なので、改行をそのまま出す */
 #confirm-text {
   white-space: pre-line;
   line-height: 1.6;

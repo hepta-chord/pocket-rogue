@@ -21,6 +21,7 @@ import {
   armorEvasion,
   armorHas,
   equipDef,
+  equipDetail,
   equipName,
   equipSummary,
   weaponAccuracy,
@@ -229,6 +230,8 @@ export function step(state: GameState, action: Action): StepResult {
   const rng = new Rng(state.rngState);
   const p = state.player;
   let interrupt = false;
+  /** このターンに足を踏み入れたか。その場での攻撃やアイテム使用では false */
+  let entered = false;
 
   if (state.prompt) {
     const result = answerPrompt(state, rng, action);
@@ -247,6 +250,7 @@ export function step(state: GameState, action: Action): StepResult {
     } else if (canStep(state.map, p.x, p.y, action.dx, action.dy)) {
       p.x = nx;
       p.y = ny;
+      entered = true;
       if (stepOnFloor(state, rng)) interrupt = true;
       if (pickUp(state)) interrupt = true;
     } else {
@@ -269,7 +273,12 @@ export function step(state: GameState, action: Action): StepResult {
 
   // 階段は乗った瞬間ではなく、確認を挟んでから降りる。
   // 長押しの連続移動で踏んだときに問答無用で降りてしまうのを防ぐ。
-  if (!state.over && !state.prompt && tileAt(state.map, p.x, p.y) === Tile.StairsDown) {
+  //
+  // 出すのは「踏み入れたとき」と「階段の上で待ったとき」だけにする。
+  // その場で戦っている間も毎ターン出ると、確認が邪魔で戦えない。
+  const onStairs = tileAt(state.map, p.x, p.y) === Tile.StairsDown;
+  const asks = onStairs && (entered || action.type === 'wait');
+  if (!state.over && !state.prompt && asks) {
     state.prompt = { kind: 'descend' };
     interrupt = true;
   }
@@ -338,7 +347,7 @@ function equipItem(state: GameState, item: Item): void {
   if (slot === 'weapon') state.weapon = next;
   else state.armor = next;
   clearDeclined(state, slot);
-  pushLog(state, 'info', `${equipName(next)} を装備した。`);
+  pushLog(state, 'info', `${equipName(next)} を装備した。${equipDetail(next, slot)}`);
 }
 
 /**
@@ -368,6 +377,7 @@ export function promptText(state: GameState): { text: string; confirm: string; c
       const found: Equipped = { id: item.equip, power: item.power };
       return {
         text: `${equipSummary(found, slot)}
+
 今: ${equipSummary(current, slot)}`,
         confirm: '持ち替える',
         cancel: '置いていく',
@@ -1216,6 +1226,8 @@ export function toViewModel(state: GameState): ViewModel {
       def: p.def + armorDefense(state.armor),
       weapon: state.weapon ? equipName(state.weapon) : null,
       armor: state.armor ? equipName(state.armor) : null,
+      weaponDetail: equipSummary(state.weapon, 'weapon'),
+      armorDetail: equipSummary(state.armor, 'armor'),
       level: state.level,
       xp: state.xp,
       xpNext: xpToNext(state.level),

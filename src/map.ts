@@ -39,14 +39,17 @@ export function isWalkable(map: GameMap, x: number, y: number): boolean {
 /**
  * (x, y) から (dx, dy) へ 1 マス動けるか。
  *
- * 斜めのときは、行き先が床でも両隣が壁なら通さない。
- * 壁と壁の隙間を斜めに抜けられると、通路の角が意味を失って逃走も追跡も成立しなくなる。
+ * 斜めのときは、行き先が床でも**隣が片方でも壁なら通さない**。
+ * 壁の角を斜めに回り込めると、通路の曲がり角が意味を失って逃走も追跡も成立しない。
  * 直交の移動には制限をかけない。
+ *
+ * 部屋は矩形、通路は直交の線で掘るので、この制限を入れても行き来はできなくなる場所は出ない
+ * (map.test.ts の到達判定が同じ規則で確かめている)。
  */
 export function canStep(map: GameMap, x: number, y: number, dx: number, dy: number): boolean {
   if (!isWalkable(map, x + dx, y + dy)) return false;
   if (dx === 0 || dy === 0) return true;
-  return isWalkable(map, x + dx, y) || isWalkable(map, x, y + dy);
+  return isWalkable(map, x + dx, y) && isWalkable(map, x, y + dy);
 }
 
 /**
