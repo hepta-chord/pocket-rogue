@@ -75,12 +75,12 @@ describe('strike', () => {
   });
 });
 
-describe('B9 のドラゴンの被弾', () => {
-  // BACKLOG 3.2 が置いた目標の裏取り。
-  // 防具は equipPower('armor', 9) = 3、ドラゴンの攻撃力は 8。
-  it('1 から 5 に散り、期待値は 3.0 になる', () => {
+describe('ボスの被弾', () => {
+  // 軽減に上限があることの裏取り。
+  // ドラゴンが出る最初の階 B10 では、防具は equipPower('armor', 10) = 3 になる。
+  it('防具で 1 に潰れず、出目の差がそのままダメージの差になる', () => {
     const rng = new Rng(hashSeed('DRAGON'));
-    const armor = equipPower('armor', 9, rng);
+    const armor = equipPower('armor', 10, rng);
     expect(armor).toBe(3);
 
     const atk = MONSTERS.dragon.atk;
@@ -88,9 +88,18 @@ describe('B9 のドラゴンの被弾', () => {
     const outcomes: number[] = [];
     for (let roll = low; roll <= atk; roll++) outcomes.push(applyDefense(roll, armor));
 
-    expect(outcomes).toEqual([1, 2, 3, 4, 5]);
+    expect(outcomes).toEqual([3, 4, 5, 6, 7, 8, 9]);
     const mean = outcomes.reduce((a, b) => a + b, 0) / outcomes.length;
-    expect(mean).toBeCloseTo(3.0, 5);
+    expect(mean).toBeCloseTo(6.0, 5);
+    // 1 に潰れない
+    expect(Math.min(...outcomes)).toBeGreaterThan(1);
+  });
+
+  it('防具を厚くしても軽減率は 75% で頭打ちになる', () => {
+    const atk = MONSTERS.dragon.atk;
+    const worst = applyDefense(atk, 99);
+    expect(worst).toBe(Math.ceil(atk / 4));
+    expect(1 - worst / atk).toBeLessThanOrEqual(0.75);
   });
 });
 

@@ -129,9 +129,30 @@ export interface MonsterDef {
   action?: MonsterAction;
 }
 
-/** 倒したときにスコアへ入る点 */
-export function bountyOf(def: MonsterDef): number {
-  return def.bounty ?? def.xp;
+/**
+ * 階が深いほど、同じ敵でも 1 体の価値が上がる割合。
+ *
+ * グレードの中では敵の種類が変わらないのに必要経験値だけが伸びるので、
+ * 深いほどレベルが上がりにくくなっていた (B9 で 1 レベルに 16 体)。
+ * HP や攻撃力と同じように経験値にも深さ補正を掛けて、どの階でも 4〜5 体で 1 レベルにする。
+ */
+export const XP_DEPTH_RATE = 0.45;
+
+function depthBonus(def: MonsterDef, depth: number): number {
+  return Math.max(0, depth - def.minDepth);
+}
+
+/** その階で倒したときの経験値 */
+export function xpFor(def: MonsterDef, depth: number): number {
+  if (def.xp <= 0) return 0;
+  return Math.max(1, Math.round(def.xp * (1 + depthBonus(def, depth) * XP_DEPTH_RATE)));
+}
+
+/** その階で倒したときにスコアへ入る点 */
+export function bountyFor(def: MonsterDef, depth: number): number {
+  const base = def.bounty ?? def.xp;
+  if (base <= 0) return 0;
+  return Math.max(1, Math.round(base * (1 + depthBonus(def, depth) * XP_DEPTH_RATE)));
 }
 
 const ANY = 99;
@@ -155,32 +176,32 @@ export function gradeAt(depth: number): number {
  */
 export const MONSTERS: Record<MonsterKind, MonsterDef> = {
   // 群れ: 1 体は弱く数で押す。グレードが上がると付与攻撃を持つ
-  rat: { name: 'ネズミ', family: 'swarm', grade: 1, hp: 3, atk: 1, def: 0, evasion: 0, xp: 1, minDepth: 1, maxDepth: 10, weight: 5, maxPerFloor: ANY, pack: [2, 3], passives: [] },
-  ratPoison: { name: '毒ネズミ', family: 'swarm', grade: 2, hp: 14, atk: 4, def: 2, evasion: 0, xp: 8, minDepth: 11, maxDepth: 20, weight: 5, maxPerFloor: ANY, pack: [2, 4], passives: [], action: { kind: 'poison', chance: 0.35 } },
-  ratRot: { name: '腐れネズミ', family: 'swarm', grade: 3, hp: 26, atk: 7, def: 4, evasion: 0, xp: 24, minDepth: 21, maxDepth: ANY, weight: 5, maxPerFloor: ANY, pack: [3, 5], passives: [], action: { kind: 'corrodeHit', chance: 0.2 } },
+  rat: { name: 'ネズミ', family: 'swarm', grade: 1, hp: 3, atk: 1, def: 0, evasion: 0, xp: 2, minDepth: 1, maxDepth: 10, weight: 5, maxPerFloor: ANY, pack: [2, 3], passives: [] },
+  ratPoison: { name: '毒ネズミ', family: 'swarm', grade: 2, hp: 14, atk: 5, def: 2, evasion: 0, xp: 8, minDepth: 11, maxDepth: 20, weight: 5, maxPerFloor: ANY, pack: [2, 4], passives: [], action: { kind: 'poison', chance: 0.35 } },
+  ratRot: { name: '腐れネズミ', family: 'swarm', grade: 3, hp: 26, atk: 9, def: 4, evasion: 0, xp: 24, minDepth: 21, maxDepth: ANY, weight: 5, maxPerFloor: ANY, pack: [3, 5], passives: [], action: { kind: 'corrodeHit', chance: 0.2 } },
 
   // 俊敏: 速い、逃げられない。グレードが上がると跳躍が付く
-  bat: { name: 'コウモリ', family: 'swift', grade: 1, hp: 4, atk: 2, def: 0, evasion: 0.1, xp: 2, minDepth: 1, maxDepth: 10, weight: 3, maxPerFloor: ANY, pack: [1, 1], passives: ['fast', 'erratic'] },
-  batGale: { name: '疾風コウモリ', family: 'swift', grade: 2, hp: 15, atk: 5, def: 2, evasion: 0.12, xp: 10, minDepth: 11, maxDepth: 20, weight: 3, maxPerFloor: ANY, pack: [1, 2], passives: ['fast', 'erratic'], action: { kind: 'leap', chance: 0.4 } },
-  batStorm: { name: '雷コウモリ', family: 'swift', grade: 3, hp: 27, atk: 8, def: 4, evasion: 0.15, xp: 30, minDepth: 21, maxDepth: ANY, weight: 3, maxPerFloor: ANY, pack: [1, 2], passives: ['fast', 'erratic'], action: { kind: 'leap', chance: 0.5 } },
+  bat: { name: 'コウモリ', family: 'swift', grade: 1, hp: 4, atk: 3, def: 0, evasion: 0.1, xp: 3, minDepth: 1, maxDepth: 10, weight: 3, maxPerFloor: ANY, pack: [1, 1], passives: ['fast', 'erratic'] },
+  batGale: { name: '疾風コウモリ', family: 'swift', grade: 2, hp: 15, atk: 7, def: 2, evasion: 0.12, xp: 10, minDepth: 11, maxDepth: 20, weight: 3, maxPerFloor: ANY, pack: [1, 2], passives: ['fast', 'erratic'], action: { kind: 'leap', chance: 0.4 } },
+  batStorm: { name: '雷コウモリ', family: 'swift', grade: 3, hp: 27, atk: 11, def: 4, evasion: 0.15, xp: 30, minDepth: 21, maxDepth: ANY, weight: 3, maxPerFloor: ANY, pack: [1, 2], passives: ['fast', 'erratic'], action: { kind: 'leap', chance: 0.5 } },
 
   // 戦士: 素直に強い。装備を落とす率が高い系統
-  goblin: { name: 'ゴブリン', family: 'warrior', grade: 1, hp: 6, atk: 2, def: 1, evasion: 0, xp: 4, minDepth: 2, maxDepth: 10, weight: 4, maxPerFloor: ANY, pack: [1, 1], passives: [], action: { kind: 'doubleAttack', chance: 0.3 } },
-  goblinArmored: { name: '重装ゴブリン', family: 'warrior', grade: 2, hp: 17, atk: 5, def: 4, evasion: 0, xp: 14, minDepth: 11, maxDepth: 20, weight: 4, maxPerFloor: ANY, pack: [1, 1], passives: [], action: { kind: 'doubleAttack', chance: 0.4 } },
-  goblinKing: { name: 'ゴブリン王', family: 'warrior', grade: 3, hp: 29, atk: 8, def: 6, evasion: 0, xp: 40, minDepth: 21, maxDepth: ANY, weight: 4, maxPerFloor: ANY, pack: [1, 1], passives: [], action: { kind: 'doubleAttack', chance: 0.5 } },
+  goblin: { name: 'ゴブリン', family: 'warrior', grade: 1, hp: 6, atk: 4, def: 1, evasion: 0, xp: 4, minDepth: 2, maxDepth: 10, weight: 4, maxPerFloor: ANY, pack: [1, 1], passives: [], action: { kind: 'doubleAttack', chance: 0.3 } },
+  goblinArmored: { name: '重装ゴブリン', family: 'warrior', grade: 2, hp: 17, atk: 7, def: 4, evasion: 0, xp: 14, minDepth: 11, maxDepth: 20, weight: 4, maxPerFloor: ANY, pack: [1, 1], passives: [], action: { kind: 'doubleAttack', chance: 0.4 } },
+  goblinKing: { name: 'ゴブリン王', family: 'warrior', grade: 3, hp: 29, atk: 11, def: 6, evasion: 0, xp: 40, minDepth: 21, maxDepth: ANY, weight: 4, maxPerFloor: ANY, pack: [1, 1], passives: [], action: { kind: 'doubleAttack', chance: 0.5 } },
 
   // 変則: 通常の戦い方が通じない。分裂 → 壁抜け → 擬態と重なっていく
-  slime: { name: 'スライム', family: 'odd', grade: 1, hp: 8, atk: 2, def: 1, evasion: 0, xp: 2, minDepth: 3, maxDepth: 10, weight: 3, maxPerFloor: 2, pack: [1, 1], passives: ['split'] },
-  slimeSplit: { name: '幽体スライム', family: 'odd', grade: 2, hp: 18, atk: 5, def: 3, evasion: 0.05, xp: 8, minDepth: 11, maxDepth: 20, weight: 3, maxPerFloor: 2, pack: [1, 1], passives: ['split', 'phasing'] },
-  slimeMimic: { name: '擬態スライム', family: 'odd', grade: 3, hp: 30, atk: 8, def: 5, evasion: 0.05, xp: 22, minDepth: 21, maxDepth: ANY, weight: 3, maxPerFloor: 2, pack: [1, 1], passives: ['split', 'phasing', 'mimic'] },
+  slime: { name: 'スライム', family: 'odd', grade: 1, hp: 8, atk: 3, def: 1, evasion: 0, xp: 3, minDepth: 3, maxDepth: 10, weight: 3, maxPerFloor: 2, pack: [1, 1], passives: ['split'] },
+  slimeSplit: { name: '幽体スライム', family: 'odd', grade: 2, hp: 18, atk: 6, def: 3, evasion: 0.05, xp: 8, minDepth: 11, maxDepth: 20, weight: 3, maxPerFloor: 2, pack: [1, 1], passives: ['split', 'phasing'] },
+  slimeMimic: { name: '擬態スライム', family: 'odd', grade: 3, hp: 30, atk: 10, def: 5, evasion: 0.05, xp: 22, minDepth: 21, maxDepth: ANY, weight: 3, maxPerFloor: 2, pack: [1, 1], passives: ['split', 'phasing', 'mimic'] },
 
   // 重装: 高 HP、鈍足、再生。強打の発生率と再生量が上がっていく
-  troll: { name: 'トロル', family: 'heavy', grade: 1, hp: 18, atk: 5, def: 3, evasion: 0, xp: 16, minDepth: 6, maxDepth: 10, weight: 2, maxPerFloor: 2, pack: [1, 1], passives: ['regen', 'slow'], action: { kind: 'smash', chance: 0.25 } },
-  trollRock: { name: '岩トロル', family: 'heavy', grade: 2, hp: 24, atk: 6, def: 4, evasion: 0, xp: 34, minDepth: 11, maxDepth: 20, weight: 2, maxPerFloor: 2, pack: [1, 1], passives: ['regen', 'slow'], action: { kind: 'smash', chance: 0.35 } },
-  trollIron: { name: '鉄トロル', family: 'heavy', grade: 3, hp: 36, atk: 9, def: 6, evasion: 0, xp: 70, minDepth: 21, maxDepth: ANY, weight: 2, maxPerFloor: 2, pack: [1, 1], passives: ['regen', 'slow'], action: { kind: 'smash', chance: 0.45 } },
+  troll: { name: 'トロル', family: 'heavy', grade: 1, hp: 18, atk: 8, def: 3, evasion: 0, xp: 16, minDepth: 6, maxDepth: 10, weight: 2, maxPerFloor: 2, pack: [1, 1], passives: ['regen', 'slow'], action: { kind: 'smash', chance: 0.25 } },
+  trollRock: { name: '岩トロル', family: 'heavy', grade: 2, hp: 24, atk: 10, def: 4, evasion: 0, xp: 34, minDepth: 11, maxDepth: 20, weight: 2, maxPerFloor: 2, pack: [1, 1], passives: ['regen', 'slow'], action: { kind: 'smash', chance: 0.35 } },
+  trollIron: { name: '鉄トロル', family: 'heavy', grade: 3, hp: 36, atk: 14, def: 6, evasion: 0, xp: 70, minDepth: 21, maxDepth: ANY, weight: 2, maxPerFloor: 2, pack: [1, 1], passives: ['regen', 'slow'], action: { kind: 'smash', chance: 0.45 } },
 
   // ボス: 階を代表する 1 体
-  dragon: { name: 'ドラゴン', family: 'boss', grade: 0, hp: 30, atk: 8, def: 3, evasion: 0, xp: 40, bounty: 120, minDepth: 10, maxDepth: ANY, weight: 0, maxPerFloor: 1, pack: [1, 1], passives: [], action: { kind: 'breath', chance: 0.3 } },
+  dragon: { name: 'ドラゴン', family: 'boss', grade: 0, hp: 30, atk: 12, def: 3, evasion: 0, xp: 40, bounty: 120, minDepth: 10, maxDepth: ANY, weight: 0, maxPerFloor: 1, pack: [1, 1], passives: [], action: { kind: 'breath', chance: 0.3 } },
 
   // 長居への対策。通常の配置では出ず、フロア内のターン数で呼ばれる。
   // 勝てない強さだが、逃げ切れるように fast は付けない。

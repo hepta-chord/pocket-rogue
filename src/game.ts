@@ -4,13 +4,14 @@ import {
   SLIME_CAP,
   STALKER,
   actorName,
-  bountyOf,
+  bountyFor,
   createMonster,
   createPlayer,
   hasPassive,
   placeMonster,
   spawnMonsters,
   spawnOne,
+  xpFor,
   type ActionKind,
   type Actor,
   type ActorKind,
@@ -1052,8 +1053,8 @@ function rewardKill(state: GameState, m: Actor): void {
   state.kills++;
   const def = MONSTERS[m.kind as MonsterKind];
   const rate = m.spawned ? SPAWN_REWARD : 1;
-  state.score += Math.ceil(bountyOf(def) * rate);
-  gainXp(state, Math.ceil(def.xp * rate));
+  state.score += Math.ceil(bountyFor(def, state.depth) * rate);
+  gainXp(state, Math.ceil(xpFor(def, state.depth) * rate));
 }
 
 /**

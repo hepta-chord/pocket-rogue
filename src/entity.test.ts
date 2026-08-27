@@ -3,11 +3,12 @@ import {
   FAMILY_NAMES,
   MONSTERS,
   STALKER,
-  bountyOf,
+  bountyFor,
   createMonster,
   familyOf,
   gradeAt,
   spawnMonsters,
+  xpFor,
   type MonsterKind,
 } from './entity';
 import { generateMap, idx, isWalkable, roomCenter } from './map';
@@ -130,13 +131,21 @@ describe('MONSTERS', () => {
     const def = MONSTERS[STALKER];
     expect(def.weight).toBe(0);
     expect(def.xp).toBe(0);
-    expect(bountyOf(def)).toBeGreaterThan(0);
+    expect(bountyFor(def, 10)).toBeGreaterThan(0);
+    expect(xpFor(def, 10)).toBe(0);
     // 逃げ切れる必要があるので速くしない
     expect(def.passives).not.toContain('fast');
   });
 
-  it('bountyOf は省略時に経験値と同じ値を返す', () => {
-    expect(bountyOf(MONSTERS.goblin)).toBe(MONSTERS.goblin.xp);
+  it('bounty を省くと経験値と同じ値になる', () => {
+    expect(bountyFor(MONSTERS.goblin, MONSTERS.goblin.minDepth)).toBe(MONSTERS.goblin.xp);
+  });
+
+  it('同じ敵でも階が深いほど経験値が増える', () => {
+    const def = MONSTERS.goblin;
+    expect(xpFor(def, def.minDepth)).toBe(def.xp);
+    expect(xpFor(def, def.minDepth + 5)).toBeGreaterThan(def.xp);
+    expect(xpFor(def, def.maxDepth)).toBeGreaterThan(xpFor(def, def.minDepth + 5));
   });
 });
 
