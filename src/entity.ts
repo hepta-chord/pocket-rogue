@@ -21,7 +21,8 @@ export type MonsterKind =
   | 'troll'
   | 'trollRock'
   | 'trollIron'
-  | 'dragon';
+  | 'dragon'
+  | 'stalker';
 export type ActorKind = 'player' | MonsterKind;
 
 export interface Actor {
@@ -38,6 +39,8 @@ export interface Actor {
   evasion: number;
   /** 擬態が解けたか。mimic を持つ敵だけが使う */
   revealed?: boolean;
+  /** フロア生成後に湧いた個体。経験値とドロップを下げる */
+  spawned?: boolean;
 }
 
 /**
@@ -105,8 +108,13 @@ export interface MonsterDef {
    * 命中 80% の武器で回避 20% の相手に当てると実効 64% になり、3 連続で外れる確率が 5% 近く出る。
    */
   evasion: number;
-  /** 倒したときの経験値。スコアの撃破点にも同じ値を使う */
+  /** 倒したときの経験値 */
   xp: number;
+  /**
+   * 倒したときのスコア。省くと経験値と同じ値になる。
+   * 追う者のように「経験値は 0 だがスコアは出す」敵を素直に書けるように分けてある。
+   */
+  bounty?: number;
   /** この階から出る */
   minDepth: number;
   /** この階を過ぎると出ない */
@@ -119,6 +127,11 @@ export interface MonsterDef {
   pack: [number, number];
   passives: Passive[];
   action?: MonsterAction;
+}
+
+/** 倒したときにスコアへ入る点 */
+export function bountyOf(def: MonsterDef): number {
+  return def.bounty ?? def.xp;
 }
 
 const ANY = 99;
@@ -168,7 +181,15 @@ export const MONSTERS: Record<MonsterKind, MonsterDef> = {
 
   // ボス: 階を代表する 1 体
   dragon: { name: 'ドラゴン', family: 'boss', grade: 0, hp: 30, atk: 8, def: 3, evasion: 0, xp: 40, minDepth: 9, maxDepth: ANY, weight: 1, maxPerFloor: 1, pack: [1, 1], passives: [], action: { kind: 'breath', chance: 0.3 } },
+
+  // 長居への対策。通常の配置では出ず、フロア内のターン数で呼ばれる。
+  // 勝てない強さだが、逃げ切れるように fast は付けない。
+  // 経験値を 0 にしてあるので、倒せてしまっても成長が壊れない。
+  stalker: { name: '追う者', family: 'boss', grade: 0, hp: 160, atk: 12, def: 8, evasion: 0, xp: 0, bounty: 300, minDepth: 1, maxDepth: ANY, weight: 0, maxPerFloor: 1, pack: [1, 1], passives: [], action: { kind: 'smash', chance: 0.3 } },
 };
+
+/** 長居への対策として呼ばれる敵 */
+export const STALKER: MonsterKind = 'stalker';
 
 export const SLIME_CAP = 4;
 
@@ -234,7 +255,7 @@ export function spawnMonsters(
   for (let attempt = 0; attempt < 30 && monsters.length < budget; attempt++) {
     const pool = (Object.keys(MONSTERS) as MonsterKind[]).filter((k) => {
       const d = MONSTERS[k];
-      return d.minDepth <= depth && depth <= d.maxDepth && (counts[k] ?? 0) < d.maxPerFloor;
+      return d.weight > 0 && d.minDepth <= depth && depth <= d.maxDepth && (counts[k] ?? 0) < d.maxPerFloor;
     });
     if (pool.length === 0) break;
     const kind = weightedPick(rng, pool);
@@ -252,6 +273,60 @@ export function spawnMonsters(
     }
   }
   return monsters;
+}
+
+/**
+ * 追加で 1 体だけ湧かせる。
+ *
+ * 倒し切ると階が無人になるので、滞在ターン数に応じて足す。
+ * 目の前に湧くと避けようがないので、置ける場所は呼び出し側が絞る。
+ */
+export function spawnOne(
+  rng: Rng,
+  map: GameMap,
+  depth: number,
+  occupied: Actor[],
+  nextId: () => number,
+  allowed: (x: number, y: number) => boolean,
+): Actor | null {
+  const pool = (Object.keys(MONSTERS) as MonsterKind[]).filter((k) => {
+    const d = MONSTERS[k];
+    return d.weight > 0 && d.minDepth <= depth && depth <= d.maxDepth;
+  });
+  if (pool.length === 0) return null;
+
+  for (let tries = 0; tries < 40; tries++) {
+    const room = rng.pick(map.rooms);
+    const x = rng.int(room.x, room.x + room.w - 1);
+    const y = rng.int(room.y, room.y + room.h - 1);
+    if (map.tiles[idx(map, x, y)] !== Tile.Floor) continue;
+    if (!allowed(x, y)) continue;
+    if (occupied.some((m) => m.x === x && m.y === y)) continue;
+    return createMonster(weightedPick(rng, pool), depth, x, y, nextId());
+  }
+  return null;
+}
+
+/** 指定した種類を 1 体、置ける場所に出す */
+export function placeMonster(
+  rng: Rng,
+  map: GameMap,
+  kind: MonsterKind,
+  depth: number,
+  occupied: Actor[],
+  nextId: () => number,
+  allowed: (x: number, y: number) => boolean,
+): Actor | null {
+  for (let tries = 0; tries < 60; tries++) {
+    const room = rng.pick(map.rooms);
+    const x = rng.int(room.x, room.x + room.w - 1);
+    const y = rng.int(room.y, room.y + room.h - 1);
+    if (map.tiles[idx(map, x, y)] !== Tile.Floor) continue;
+    if (!allowed(x, y)) continue;
+    if (occupied.some((m) => m.x === x && m.y === y)) continue;
+    return createMonster(kind, depth, x, y, nextId());
+  }
+  return null;
 }
 
 function weightedPick(rng: Rng, pool: MonsterKind[]): MonsterKind {

@@ -1,11 +1,15 @@
 import {
   MONSTERS,
   SLIME_CAP,
+  STALKER,
   actorName,
+  bountyOf,
   createMonster,
   createPlayer,
   hasPassive,
+  placeMonster,
   spawnMonsters,
+  spawnOne,
   type ActionKind,
   type Actor,
   type ActorKind,
@@ -76,6 +80,15 @@ const POISON_DAMAGE = 1;
 /** 毒を受けたときに乗る残りターン数 */
 const POISON_TURNS = 8;
 
+/** フロア内でこのターン数ごとに 1 体湧く */
+const SPAWN_INTERVAL = 45;
+/** 湧いた個体の経験値とドロップ率の倍率。0 にはせず、倒す価値は残す */
+const SPAWN_REWARD = 0.5;
+/** 追う者の予告が出るフロア内ターン数 */
+const STALKER_WARN = 200;
+/** 追う者が現れるフロア内ターン数 */
+const STALKER_TURN = 240;
+
 /** 魔法。コストはスタミナで払う */
 export type SpellKind = 'thunder';
 
@@ -103,7 +116,7 @@ export interface StepResult {
   interrupt: boolean;
 }
 
-export const SAVE_VERSION = 11;
+export const SAVE_VERSION = 12;
 
 /**
  * 次のレベルまでに必要な経験値。
@@ -147,6 +160,10 @@ export interface GameState {
   floors: FloorTile[];
   /** 残りターン数つきの効果。0 になったら切れる */
   effects: Partial<Record<TimedEffect, number>>;
+  /** 今の階に入ってからのターン数。追加の湧きと追う者はこれを見る */
+  floorTurn: number;
+  /** 追う者を呼んだか。1 階に 1 度だけ */
+  stalkerCalled: boolean;
   /** 持っている消耗品の数 */
   inventory: Inventory;
   /** 確認待ち。null なら通常の操作を受け付ける */
@@ -209,6 +226,8 @@ export function newGame(seed: string): GameState {
     items: [],
     floors: [],
     effects: {},
+    floorTurn: 0,
+    stalkerCalled: false,
     inventory: emptyInventory(),
     prompt: null,
     stamina: STAMINA_MAX,
@@ -405,9 +424,11 @@ function endTurn(state: GameState, rng: Rng, opts: { enemies: boolean }): void {
     for (let i = 0; i < times; i++) monstersAct(state, rng);
   }
   state.turn++;
+  state.floorTurn++;
   tickEffects(state);
   tickStamina(state);
   updateFov(state);
+  tickFloorPressure(state, rng);
 
   const p = state.player;
   if (p.hp <= 0) {
@@ -441,6 +462,8 @@ function descend(state: GameState, rng: Rng): void {
     ? spawnFloors(rng, state.map, state.depth, start, stairsAt, [...state.monsters, ...state.items])
     : [];
   state.effects = {};
+  state.floorTurn = 0;
+  state.stalkerCalled = false;
   state.visible = new Array<number>(MAP_W * MAP_H).fill(0);
   state.explored = new Array<number>(MAP_W * MAP_H).fill(0);
   updateFov(state);
@@ -821,7 +844,7 @@ function killMonster(state: GameState, rng: Rng, m: Actor): void {
  */
 function dropEquip(state: GameState, rng: Rng, m: Actor): void {
   const family = MONSTERS[m.kind as MonsterKind].family;
-  if (!rng.chance(DROP_CHANCE)) return;
+  if (!rng.chance(DROP_CHANCE * (m.spawned ? SPAWN_REWARD : 1))) return;
   if (state.items.some((it) => it.x === m.x && it.y === m.y)) return;
   const id = pickDropEquip(rng, family);
   if (!id) return;
@@ -830,12 +853,16 @@ function dropEquip(state: GameState, rng: Rng, m: Actor): void {
   pushLog(state, 'info', `${itemLabel(item)} を落とした。`);
 }
 
-/** 撃破数・スコア・経験値をまとめて加算する。雷で倒したときもここを通す */
+/**
+ * 撃破数・スコア・経験値をまとめて加算する。雷で倒したときもここを通す。
+ * 後から湧いた個体は報酬を半分にする。居座って稼ぐ動機を弱めるためで、0 にはしない。
+ */
 function rewardKill(state: GameState, m: Actor): void {
   state.kills++;
   const def = MONSTERS[m.kind as MonsterKind];
-  state.score += def.xp;
-  gainXp(state, def.xp);
+  const rate = m.spawned ? SPAWN_REWARD : 1;
+  state.score += Math.ceil(bountyOf(def) * rate);
+  gainXp(state, Math.ceil(def.xp * rate));
 }
 
 /**
@@ -1121,6 +1148,62 @@ function updateFov(state: GameState): void {
   for (let i = 0; i < state.visible.length; i++) {
     if (state.visible[i] === 1) state.explored[i] = 1;
   }
+}
+
+/**
+ * 長居への対策。
+ *
+ * 滞在ターン数に応じて敵を足し、それでも居座るなら追う者を呼ぶ。
+ * 湧きは視界の外にだけ出す。目の前に湧くと避けようがない。
+ */
+function tickFloorPressure(state: GameState, rng: Rng): void {
+  if (state.over) return;
+
+  if (state.floorTurn > 0 && state.floorTurn % SPAWN_INTERVAL === 0) {
+    const m = spawnOne(rng, state.map, state.depth, state.monsters, () => state.nextId++, (x, y) =>
+      outOfSight(state, x, y),
+    );
+    if (m) {
+      m.spawned = true;
+      state.monsters.push(m);
+    }
+  }
+
+  if (state.stalkerCalled) return;
+
+  if (state.floorTurn === STALKER_WARN) {
+    // 階段の位置を把握できていない段階で出ると詰むので、方角だけ添えて予告する
+    pushLog(state, 'alert', `地響きが近づいてくる。階段は${stairsDirection(state)}にある。`);
+    return;
+  }
+
+  if (state.floorTurn >= STALKER_TURN) {
+    const m = placeMonster(rng, state.map, STALKER, state.depth, state.monsters, () => state.nextId++, (x, y) =>
+      outOfSight(state, x, y),
+    );
+    if (!m) return;
+    state.monsters.push(m);
+    state.stalkerCalled = true;
+    pushLog(state, 'alert', `${actorName(STALKER)}が現れた。勝てない。降りろ。`);
+  }
+}
+
+/** 視界の外で、プレイヤーから十分離れているか */
+function outOfSight(state: GameState, x: number, y: number): boolean {
+  if (state.visible[idx(state.map, x, y)] === 1) return false;
+  const p = state.player;
+  return Math.max(Math.abs(x - p.x), Math.abs(y - p.y)) >= 8;
+}
+
+/** プレイヤーから見た階段の方角 */
+function stairsDirection(state: GameState): string {
+  const at = stairsPos(state.map);
+  if (!at) return 'どこか';
+  const dx = at.x - state.player.x;
+  const dy = at.y - state.player.y;
+  const ns = dy < -2 ? '北' : dy > 2 ? '南' : '';
+  const ew = dx > 2 ? '東' : dx < -2 ? '西' : '';
+  return ns + ew || 'すぐ近く';
 }
 
 const EFFECT_END: Record<TimedEffect, string> = {

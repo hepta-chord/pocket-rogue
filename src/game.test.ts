@@ -5,6 +5,7 @@ import {
   SPELLS,
   applyFloorEffect,
   canCast,
+  isDisguised,
   newGame,
   step,
   toViewModel,
@@ -583,6 +584,171 @@ describe('一時的な効果', () => {
     for (let i = 0; i < 20; i++) applyFloorEffectForTest(s, { kind: 'drainStaminaMax', amount: 15 });
     expect(s.staminaMax).toBeGreaterThanOrEqual(20);
     expect(s.stamina).toBeLessThanOrEqual(s.staminaMax);
+  });
+});
+
+describe('長居への対策', () => {
+  /**
+   * その場で待ち続ける。
+   * 追う者の検証が目的なので、湧いた雑魚だけ消して追う者は残す。
+   */
+  function idleOnFloor(s: GameState, turns: number): void {
+    for (let i = 0; i < turns; i++) {
+      s.monsters = s.monsters.filter((m) => m.kind === 'stalker');
+      s.stamina = s.staminaMax;
+      s.player.hp = s.player.maxHp;
+      step(s, WAIT);
+      if (s.over) return;
+    }
+  }
+
+  it('フロア内のターン数を数える', () => {
+    const s = newGame('PR1');
+    s.monsters = [];
+    step(s, WAIT);
+    step(s, WAIT);
+    expect(s.floorTurn).toBe(2);
+  });
+
+  it('居座ると敵が湧く', () => {
+    const s = newGame('PR2');
+    s.monsters = [];
+    // 湧きの間隔ちょうどまで待つ
+    for (let i = 0; i < 45; i++) {
+      s.stamina = s.staminaMax;
+      step(s, WAIT);
+    }
+    expect(s.monsters.length).toBeGreaterThan(0);
+    expect(s.monsters.every((m) => m.spawned)).toBe(true);
+  });
+
+  it('湧いた個体は見えない位置に出る', () => {
+    const s = newGame('PR3');
+    s.monsters = [];
+    for (let i = 0; i < 45; i++) {
+      s.stamina = s.staminaMax;
+      step(s, WAIT);
+    }
+    for (const m of s.monsters) {
+      expect(s.visible[m.y * s.map.width + m.x]).not.toBe(1);
+    }
+  });
+
+  it('湧いた個体は報酬が下がる', () => {
+    const normal = newGame('PR4');
+    const spawned = newGame('PR4');
+    const spot = neighborOf(normal, normal.player);
+    if (!spot) return;
+
+    const kill = (s: GameState, mark: boolean): number => {
+      const m = createMonster('goblin', 1, spot.x, spot.y, 90);
+      m.hp = 1;
+      m.def = 0;
+      m.evasion = 0;
+      m.spawned = mark;
+      s.monsters = [m];
+      const before = s.score;
+      step(s, { type: 'move', dx: m.x - s.player.x, dy: m.y - s.player.y });
+      return s.score - before;
+    };
+    expect(kill(spawned, true)).toBeLessThan(kill(normal, false));
+  });
+
+  it('追う者は予告のあとに現れる', () => {
+    const s = newGame('PR5');
+    idleOnFloor(s, 199);
+    expect(s.monsters.some((m) => m.kind === 'stalker')).toBe(false);
+
+    idleOnFloor(s, 2);
+    const warned = s.log.some((l) => l.text.includes('地響き'));
+    expect(warned).toBe(true);
+    expect(s.monsters.some((m) => m.kind === 'stalker')).toBe(false);
+
+    idleOnFloor(s, 45);
+    expect(s.stalkerCalled).toBe(true);
+    expect(s.monsters.some((m) => m.kind === 'stalker')).toBe(true);
+  });
+
+  it('予告に階段の方角が入る', () => {
+    const s = newGame('PR6');
+    idleOnFloor(s, 201);
+    const warn = s.log.find((l) => l.text.includes('地響き'));
+    expect(warn?.text).toMatch(/階段は.+にある/);
+  });
+
+  it('階を降りるとフロア内のターン数と追う者がリセットされる', () => {
+    const s = newGame('PR7');
+    idleOnFloor(s, 245);
+    expect(s.stalkerCalled).toBe(true);
+    const stairs = s.map.tiles.indexOf(Tile.StairsDown);
+    s.player.x = stairs % s.map.width;
+    s.player.y = Math.floor(stairs / s.map.width);
+    s.prompt = { kind: 'descend' };
+    step(s, { type: 'confirm' });
+    expect(s.floorTurn).toBe(1);
+    expect(s.stalkerCalled).toBe(false);
+    expect(s.monsters.some((m) => m.kind === 'stalker')).toBe(false);
+  });
+});
+
+describe('擬態', () => {
+  it('正体が割れるまで武器として見える', () => {
+    const s = newGame('MI1');
+    const spot = neighborOf(s, s.player);
+    if (!spot) return;
+    const m = createMonster('slimeMimic', 21, spot.x, spot.y, 90);
+    s.monsters = [m];
+    expect(isDisguised(m)).toBe(true);
+    const vm = toViewModel(s);
+    expect(vm.actors.find((a) => a.x === m.x && a.y === m.y)?.disguised).toBe(true);
+  });
+
+  it('殴ると正体が割れる', () => {
+    const s = newGame('MI2');
+    const spot = neighborOf(s, s.player);
+    if (!spot) return;
+    const m = createMonster('slimeMimic', 21, spot.x, spot.y, 90);
+    m.hp = 999;
+    m.maxHp = 999;
+    s.monsters = [m];
+    step(s, { type: 'move', dx: m.x - s.player.x, dy: m.y - s.player.y });
+    expect(m.revealed).toBe(true);
+    expect(isDisguised(m)).toBe(false);
+  });
+
+  it('離れている間は動かない', () => {
+    const s = newGame('MI3');
+    const m = createMonster('slimeMimic', 21, s.player.x, s.player.y, 90);
+    // プレイヤーから離れた歩ける場所に置く
+    const far = s.map.rooms[s.map.rooms.length - 1];
+    m.x = far.x;
+    m.y = far.y;
+    s.monsters = [m];
+    const before = { x: m.x, y: m.y };
+    for (let i = 0; i < 10; i++) {
+      s.stamina = s.staminaMax;
+      step(s, WAIT);
+    }
+    expect(m.x).toBe(before.x);
+    expect(m.y).toBe(before.y);
+  });
+});
+
+describe('毒', () => {
+  it('毎ターン HP が減り、やがて抜ける', () => {
+    const s = newGame('PO1');
+    s.monsters = [];
+    s.player.maxHp = 99;
+    s.player.hp = 99;
+    s.effects.poison = 3;
+    step(s, WAIT);
+    expect(s.player.hp).toBe(98);
+    step(s, WAIT);
+    step(s, WAIT);
+    expect(s.effects.poison).toBeUndefined();
+    const settled = s.player.hp;
+    step(s, WAIT);
+    expect(s.player.hp).toBeGreaterThanOrEqual(settled);
   });
 });
 

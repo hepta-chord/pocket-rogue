@@ -48,6 +48,9 @@ export const ACTOR_GLYPHS: Record<ActorKind, Glyph> = {
   trollIron: { ch: 'T', fg: '#d0d0d8' },
 
   dragon: { ch: 'D', fg: '#ff5c5c' },
+
+  // 長居への対策。他のどれとも似ない文字にして、見た瞬間に逃げると分かるようにする
+  stalker: { ch: 'X', fg: '#ff2d55' },
 };
 
 export const ITEM_GLYPHS: Record<ItemKind, Glyph> = {

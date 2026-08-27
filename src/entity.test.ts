@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   FAMILY_NAMES,
   MONSTERS,
+  STALKER,
+  bountyOf,
   createMonster,
   familyOf,
   gradeAt,
@@ -20,15 +22,15 @@ describe('MONSTERS', () => {
     }
   });
 
-  it('5 系統 × 3 グレード + ボスの 16 種になっている', () => {
-    expect(KINDS).toHaveLength(16);
+  it('5 系統 × 3 グレードの 15 種と、ボス枠がある', () => {
     const byFamily: Record<string, MonsterKind[]> = {};
     for (const k of KINDS) (byFamily[MONSTERS[k].family] ??= []).push(k);
     for (const f of ['swarm', 'swift', 'warrior', 'odd', 'heavy']) {
       expect(byFamily[f]).toHaveLength(3);
       expect(byFamily[f].map((k) => MONSTERS[k].grade).sort()).toEqual([1, 2, 3]);
     }
-    expect(byFamily.boss).toHaveLength(1);
+    // ボス枠はドラゴンと追う者
+    expect(byFamily.boss).toEqual(['dragon', 'stalker']);
   });
 
   it('グレードごとに出現する階が 10 階ずつずれている', () => {
@@ -120,8 +122,21 @@ describe('MONSTERS', () => {
     for (const k of KINDS) {
       expect(MONSTERS[k].minDepth).toBeLessThanOrEqual(MONSTERS[k].maxDepth);
       expect(MONSTERS[k].pack[0]).toBeLessThanOrEqual(MONSTERS[k].pack[1]);
-      expect(MONSTERS[k].weight).toBeGreaterThan(0);
+      expect(MONSTERS[k].weight).toBeGreaterThanOrEqual(0);
     }
+  });
+
+  it('追う者は通常の配置では出ず、経験値が 0 でスコアだけ出る', () => {
+    const def = MONSTERS[STALKER];
+    expect(def.weight).toBe(0);
+    expect(def.xp).toBe(0);
+    expect(bountyOf(def)).toBeGreaterThan(0);
+    // 逃げ切れる必要があるので速くしない
+    expect(def.passives).not.toContain('fast');
+  });
+
+  it('bountyOf は省略時に経験値と同じ値を返す', () => {
+    expect(bountyOf(MONSTERS.goblin)).toBe(MONSTERS.goblin.xp);
   });
 });
 
