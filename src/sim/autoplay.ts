@@ -15,6 +15,7 @@ import {
   type DamageEvent,
   type GameState,
 } from '../game';
+import { STACK_MAX, isEquip, type Item } from '../items';
 import { canStep, idx, isWalkable, Tile } from '../map';
 
 export interface Policy {
@@ -183,9 +184,22 @@ function decide(state: GameState, policy: Policy): Action {
 }
 
 function nearestItemStep(state: GameState, range: number): Action | null {
-  const known = state.items.filter((it) => state.explored[idx(state.map, it.x, it.y)] === 1);
+  const known = state.items.filter(
+    (it) => state.explored[idx(state.map, it.x, it.y)] === 1 && canTake(state, it),
+  );
   if (known.length === 0) return null;
   return bfsStep(state, known.map((it) => ({ x: it.x, y: it.y })), range);
+}
+
+/**
+ * 拾って意味があるか。
+ *
+ * 所持上限に達した消耗品は踏んでも拾えず床に残る。
+ * 除かないと、同じアイテムを目指して踏んでは離れるのを繰り返し、階から出られなくなる。
+ */
+function canTake(state: GameState, item: Item): boolean {
+  if (isEquip(item.kind)) return true;
+  return state.inventory[item.kind] < STACK_MAX;
 }
 
 function stepTowardStairs(state: GameState): Action | null {

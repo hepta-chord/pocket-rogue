@@ -41,11 +41,20 @@ export interface StepResult {
   interrupt: boolean;
 }
 
-export const SAVE_VERSION = 6;
+export const SAVE_VERSION = 7;
 
-/** 次のレベルまでに必要な経験値 */
+/**
+ * 次のレベルまでに必要な経験値。
+ *
+ * 線形だと、敵の経験値が階ごとに跳ね上がるのに追いつけない。
+ * 深層では 2 体倒すたびにレベルが上がり、レベルアップの全回復と噛み合って
+ * 下降圧を足す仕様がすべて無効化される。
+ *
+ * 三角数で伸ばして、どの階でも 4〜5 体で 1 レベルに収まるようにしている。
+ * 定数は敵の経験値表と対で決まるので、敵を 15 種に入れ替えたあと計測して合わせ直す。
+ */
 export function xpToNext(level: number): number {
-  return 6 + (level - 1) * 4;
+  return 6 + (level * (level + 1)) / 2;
 }
 
 /** 階に到達したときのスコア */
@@ -359,7 +368,9 @@ function rewardKill(state: GameState, m: Actor): void {
 
 /**
  * 経験値を加算し、足りていればレベルを上げる。
- * レベルアップで実 HP も増えるので、戦うこと自体が回復を兼ねる (自然回復が無いぶんの埋め合わせ)。
+ *
+ * レベルアップで HP が全快する。回復手段が乏しいぶんの埋め合わせであり、
+ * 「瀕死のまま踏み込んで全回復を取りにいくか」を判断にするための仕掛けでもある。
  *
  * 攻撃力はレベルでは伸びない。武器で決まる。
  * レベルと装備の両方で伸ばすと、深層で攻撃力だけが青天井になって難易度が頭打ちになる。
@@ -371,8 +382,8 @@ function gainXp(state: GameState, amount: number): void {
     state.xp -= xpToNext(state.level);
     state.level++;
     p.maxHp += LEVEL_HP;
-    p.hp += LEVEL_HP;
-    pushLog(state, 'player', `レベル ${state.level} になった。最大 HP が上がった。`);
+    p.hp = p.maxHp;
+    pushLog(state, 'player', `レベル ${state.level} になった。最大 HP が上がり、全快した。`);
   }
 }
 

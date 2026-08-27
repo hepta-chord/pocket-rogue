@@ -99,6 +99,69 @@ describe('xpToNext', () => {
       expect(xpToNext(lv + 1)).toBeGreaterThan(xpToNext(lv));
     }
   });
+
+  it('線形ではなく、伸び幅そのものが増える', () => {
+    for (let lv = 1; lv < 40; lv++) {
+      const nearGap = xpToNext(lv + 1) - xpToNext(lv);
+      const farGap = xpToNext(lv + 2) - xpToNext(lv + 1);
+      expect(farGap).toBeGreaterThan(nearGap);
+    }
+  });
+
+  it('具体値を固定する', () => {
+    expect(xpToNext(1)).toBe(7);
+    expect(xpToNext(5)).toBe(21);
+    expect(xpToNext(10)).toBe(61);
+  });
+
+  it('整数を返す', () => {
+    for (let lv = 1; lv < 60; lv++) expect(Number.isInteger(xpToNext(lv))).toBe(true);
+  });
+});
+
+describe('レベルアップ', () => {
+  it('HP が全快し、最大 HP が増える', () => {
+    const s = newGame('LVUP1');
+    const spot = neighborOf(s, s.player);
+    if (!spot) return;
+    // 邪魔が入らないように敵を 1 体だけ残す
+    const m = s.monsters[0];
+    s.monsters = [m];
+    m.x = spot.x;
+    m.y = spot.y;
+    m.hp = 1;
+    m.def = 0;
+
+    s.xp = xpToNext(s.level) - 1;
+    s.player.hp = 1;
+    const maxBefore = s.player.maxHp;
+    const levelBefore = s.level;
+
+    step(s, { type: 'move', dx: m.x - s.player.x, dy: m.y - s.player.y });
+
+    expect(s.level).toBe(levelBefore + 1);
+    expect(s.player.maxHp).toBeGreaterThan(maxBefore);
+    expect(s.player.hp).toBe(s.player.maxHp);
+  });
+
+  it('攻撃力はレベルでは伸びない', () => {
+    const s = newGame('LVUP2');
+    const atkBefore = s.player.atk;
+    const spot = neighborOf(s, s.player);
+    if (!spot) return;
+    const m = s.monsters[0];
+    s.monsters = [m];
+    m.x = spot.x;
+    m.y = spot.y;
+    m.hp = 1;
+    m.def = 0;
+    s.xp = xpToNext(s.level) - 1;
+
+    step(s, { type: 'move', dx: m.x - s.player.x, dy: m.y - s.player.y });
+
+    expect(s.level).toBeGreaterThan(1);
+    expect(s.player.atk).toBe(atkBefore);
+  });
 });
 
 describe('ログ', () => {
