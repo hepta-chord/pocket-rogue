@@ -134,25 +134,25 @@ export interface MonsterDef {
  *
  * グレードの中では敵の種類が変わらないのに必要経験値だけが伸びるので、
  * 深いほどレベルが上がりにくくなっていた (B9 で 1 レベルに 16 体)。
- * HP や攻撃力と同じように経験値にも深さ補正を掛けて、どの階でも 4〜5 体で 1 レベルにする。
+ * HP や攻撃力と同じように経験値にも深さ補正を掛けて、どの階でも 4〜8 体で 1 レベルにする。
+ *
+ * 掛けるのは「その敵が出始めてからの階数」ではなく**絶対の階数**である。
+ * 出始めからの階数だと、グレードが切り替わる階で補正が 0 に戻り、
+ * B10 より B11 のほうが 1 体の経験値が下がって、そこだけレベルが上がらなくなる。
  */
-export const XP_DEPTH_RATE = 0.45;
-
-function depthBonus(def: MonsterDef, depth: number): number {
-  return Math.max(0, depth - def.minDepth);
-}
+export const XP_DEPTH_RATE = 0.15;
 
 /** その階で倒したときの経験値 */
 export function xpFor(def: MonsterDef, depth: number): number {
   if (def.xp <= 0) return 0;
-  return Math.max(1, Math.round(def.xp * (1 + depthBonus(def, depth) * XP_DEPTH_RATE)));
+  return Math.max(1, Math.round(def.xp * (1 + depth * XP_DEPTH_RATE)));
 }
 
 /** その階で倒したときにスコアへ入る点 */
 export function bountyFor(def: MonsterDef, depth: number): number {
   const base = def.bounty ?? def.xp;
   if (base <= 0) return 0;
-  return Math.max(1, Math.round(base * (1 + depthBonus(def, depth) * XP_DEPTH_RATE)));
+  return Math.max(1, Math.round(base * (1 + depth * XP_DEPTH_RATE)));
 }
 
 const ANY = 99;
@@ -177,7 +177,7 @@ export function gradeAt(depth: number): number {
 export const MONSTERS: Record<MonsterKind, MonsterDef> = {
   // 群れ: 1 体は弱く数で押す。グレードが上がると付与攻撃を持つ
   rat: { name: 'ネズミ', family: 'swarm', grade: 1, hp: 3, atk: 1, def: 0, evasion: 0, xp: 2, minDepth: 1, maxDepth: 10, weight: 5, maxPerFloor: ANY, pack: [2, 3], passives: [] },
-  ratPoison: { name: '毒ネズミ', family: 'swarm', grade: 2, hp: 14, atk: 5, def: 2, evasion: 0, xp: 8, minDepth: 11, maxDepth: 20, weight: 5, maxPerFloor: ANY, pack: [2, 4], passives: [], action: { kind: 'poison', chance: 0.35 } },
+  ratPoison: { name: '毒ネズミ', family: 'swarm', grade: 2, hp: 14, atk: 5, def: 2, evasion: 0, xp: 8, minDepth: 11, maxDepth: 20, weight: 5, maxPerFloor: ANY, pack: [2, 4], passives: [], action: { kind: 'poison', chance: 0.25 } },
   ratRot: { name: '腐れネズミ', family: 'swarm', grade: 3, hp: 26, atk: 9, def: 4, evasion: 0, xp: 24, minDepth: 21, maxDepth: ANY, weight: 5, maxPerFloor: ANY, pack: [3, 5], passives: [], action: { kind: 'corrodeHit', chance: 0.2 } },
 
   // 俊敏: 速い、逃げられない。グレードが上がると跳躍が付く

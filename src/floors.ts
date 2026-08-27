@@ -22,6 +22,8 @@ export type Magnitude = 'small' | 'medium' | 'large';
 
 export type FloorEffect =
   | { kind: 'healHp'; size: Magnitude }
+  /** 立て直し。HP を全回復し、スタミナも戻す */
+  | { kind: 'rest'; stamina: number }
   | { kind: 'damage'; size: Magnitude }
   | { kind: 'restoreStamina'; amount: number }
   | { kind: 'gainXp'; size: Magnitude }
@@ -87,8 +89,10 @@ export const FLOORS: Record<FloorKind, FloorDef> = {
     badRate: 0.5,
   },
   blue: {
+    // 立て直しの拠点なので、HP とスタミナの両方を戻す。
+    // スタミナが尽きて死ぬ run が多かったので、拠点にその役目も持たせている
     name: '青の床',
-    good: [{ kind: 'healHp', size: 'large' }],
+    good: [{ kind: 'rest', stamina: 50 }],
     bad: [],
     badRate: 0,
   },

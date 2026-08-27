@@ -5,6 +5,8 @@ import {
   SPELLS,
   applyFloorEffect,
   canCast,
+  STALKER_TURN,
+  STALKER_WARN,
   isBossFloor,
   isClearFloor,
   isDisguised,
@@ -518,12 +520,14 @@ describe('イベント床', () => {
     expect(s.floors).toHaveLength(0);
   });
 
-  it('青い床は HP を大きく回復する', () => {
+  it('青い床は HP を全回復し、スタミナも戻す', () => {
     const s = newGame('FL3');
     s.player.maxHp = 40;
     s.player.hp = 5;
+    s.stamina = 10;
     if (!stepOnto(s, 'blue')) return;
     expect(s.player.hp).toBe(40);
+    expect(s.stamina).toBeGreaterThan(10);
   });
 
   it('ViewModel にセルの種別が出る', () => {
@@ -667,31 +671,37 @@ describe('長居への対策', () => {
     expect(kill(spawned, true)).toBeLessThan(kill(normal, false));
   });
 
+  it('予告が出るのは、普通の探索より十分あとである', () => {
+    // 1 階の滞在は 100〜120 ターンほどなので、その倍を超えるあたりに置いてある
+    expect(STALKER_WARN).toBeGreaterThan(240);
+    expect(STALKER_TURN).toBeGreaterThan(STALKER_WARN);
+  });
+
   it('追う者は予告のあとに現れる', () => {
     const s = newGame('PR5');
-    idleOnFloor(s, 199);
+    idleOnFloor(s, STALKER_WARN - 1);
+    expect(s.log.some((l) => l.text.includes('地響き'))).toBe(false);
     expect(s.monsters.some((m) => m.kind === 'stalker')).toBe(false);
 
     idleOnFloor(s, 2);
-    const warned = s.log.some((l) => l.text.includes('地響き'));
-    expect(warned).toBe(true);
+    expect(s.log.some((l) => l.text.includes('地響き'))).toBe(true);
     expect(s.monsters.some((m) => m.kind === 'stalker')).toBe(false);
 
-    idleOnFloor(s, 45);
+    idleOnFloor(s, STALKER_TURN - STALKER_WARN + 1);
     expect(s.stalkerCalled).toBe(true);
     expect(s.monsters.some((m) => m.kind === 'stalker')).toBe(true);
   });
 
   it('予告に階段の方角が入る', () => {
     const s = newGame('PR6');
-    idleOnFloor(s, 201);
+    idleOnFloor(s, STALKER_WARN + 1);
     const warn = s.log.find((l) => l.text.includes('地響き'));
     expect(warn?.text).toMatch(/階段は.+にある/);
   });
 
   it('階を降りるとフロア内のターン数と追う者がリセットされる', () => {
     const s = newGame('PR7');
-    idleOnFloor(s, 245);
+    idleOnFloor(s, STALKER_TURN + 5);
     expect(s.stalkerCalled).toBe(true);
     const stairs = s.map.tiles.indexOf(Tile.StairsDown);
     s.player.x = stairs % s.map.width;
@@ -749,6 +759,16 @@ describe('擬態', () => {
 });
 
 describe('毒', () => {
+  it('重ね掛けに上限がある', () => {
+    const s = newGame('PO2');
+    s.monsters = [];
+    for (let i = 0; i < 10; i++) applyFloorEffect(s, { kind: 'haste', turns: 1 });
+    // 毒は床効果には無いので、直接積んで上限だけ確かめる
+    s.effects.poison = 999;
+    step(s, WAIT);
+    expect(s.effects.poison).toBeLessThan(999);
+  });
+
   it('毎ターン HP が減り、やがて抜ける', () => {
     const s = newGame('PO1');
     s.monsters = [];

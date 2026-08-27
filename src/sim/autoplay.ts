@@ -6,14 +6,17 @@
 //
 // GameState と step() が DOM を触らないので、そのまま Node で回せる。
 
+import { BOSS } from '../entity';
 import {
   canCast,
+  isBossFloor,
   newGame,
   setDamageObserver,
   step,
   visibleMonsters,
   type Action,
   type DamageEvent,
+  type DamageSource,
   type GameState,
 } from '../game';
 import {
@@ -70,6 +73,14 @@ export interface RunResult {
   died: boolean;
   /** レベルアップ 1 回あたりに倒した敵の数。レベル 1 のままなら null */
   killsPerLevel: number | null;
+  /** 到達したボス階の数 (B10, B20, ...) */
+  bossFloorsSeen: number;
+  /** 倒したボスの数 */
+  bossKills: number;
+  /** 脱出してクリアしたか */
+  cleared: boolean;
+  /** 最後に受けたダメージの出どころ。死因の目安 */
+  killedBy: DamageSource | null;
   /** 階ごとの内訳 */
   byDepth: DepthStats[];
 }
@@ -106,8 +117,10 @@ export function runOne(
     return r;
   };
 
+  let killedBy: DamageSource | null = null;
   setDamageObserver((e: DamageEvent) => {
     if (e.to !== 'player') return;
+    killedBy = e.from;
     const r = row(e.depth);
     r.hits++;
     r.totalDealt += e.dealt;
@@ -118,6 +131,9 @@ export function runOne(
   let maxDepth = state.depth;
   let floorStart = state.turn;
   let lastDepth = state.depth;
+  let bossFloorsSeen = isBossFloor(state.depth) ? 1 : 0;
+  let bossKills = 0;
+  let bossHere = state.monsters.some((m) => m.kind === BOSS);
   let lastKills = state.kills;
   let lastLevel = state.level;
   let lastTurn = state.turn;
@@ -127,6 +143,8 @@ export function runOne(
       if (state.depth !== lastDepth) {
         lastDepth = state.depth;
         floorStart = state.turn;
+        if (isBossFloor(state.depth)) bossFloorsSeen++;
+        bossHere = state.monsters.some((m) => m.kind === BOSS);
       }
       if (state.turn - floorStart > limits.maxTurnsPerFloor) break;
 
@@ -145,6 +163,12 @@ export function runOne(
       lastLevel = state.level;
       lastTurn = state.turn;
 
+      // ボスが消えていたら倒したとみなす (この階から出ないので取り違えない)
+      if (bossHere && !state.monsters.some((m) => m.kind === BOSS)) {
+        bossHere = false;
+        bossKills++;
+      }
+
       maxDepth = Math.max(maxDepth, state.depth);
     }
   } finally {
@@ -161,6 +185,10 @@ export function runOne(
     score: state.score,
     died: state.over,
     killsPerLevel: levelUps > 0 ? state.kills / levelUps : null,
+    bossFloorsSeen,
+    bossKills,
+    cleared: state.cleared,
+    killedBy: state.over ? killedBy : null,
     byDepth: [...rows.values()].sort((a, b) => a.depth - b.depth),
   };
 }

@@ -14,8 +14,23 @@ export interface Summary {
   score: Quantiles;
   /** 到達階のヒストグラム。深い順ではなく浅い順 */
   depthHistogram: { depth: number; count: number }[];
+  /** 各階に到達した run の割合 */
+  reachRate: { depth: number; rate: number }[];
+  /** ボス階に着いた回数と、そのうち倒した回数 */
+  boss: { seen: number; killed: number; rate: number };
+  /** 脱出してクリアした run の数 */
+  cleared: number;
+  /** 死因の内訳。多い順 */
+  deaths: { cause: string; count: number }[];
   byDepth: DepthSummary[];
 }
+
+/** 死因の表示名 */
+const CAUSE_NAMES: Record<string, string> = {
+  poison: '毒',
+  starve: 'スタミナ切れ',
+  floor: 'イベント床',
+};
 
 export interface Quantiles {
   min: number;
@@ -80,10 +95,32 @@ export function summarize(results: RunResult[]): Summary {
       };
     });
 
+  const deepest = Math.max(1, ...depths);
+  const reachRate = Array.from({ length: deepest }, (_, i) => ({
+    depth: i + 1,
+    rate: depths.filter((d) => d >= i + 1).length / results.length,
+  }));
+
+  const bossSeen = sum(results.map((r) => r.bossFloorsSeen));
+  const bossKilled = sum(results.map((r) => r.bossKills));
+
+  const causeCount = new Map<string, number>();
+  for (const r of results) {
+    if (!r.killedBy) continue;
+    const key = CAUSE_NAMES[r.killedBy] ?? r.killedBy;
+    causeCount.set(key, (causeCount.get(key) ?? 0) + 1);
+  }
+
   return {
     runs: results.length,
     died: results.filter((r) => r.died).length,
     stuck: results.filter((r) => !r.died).length,
+    reachRate,
+    boss: { seen: bossSeen, killed: bossKilled, rate: bossSeen > 0 ? bossKilled / bossSeen : 0 },
+    cleared: results.filter((r) => r.cleared).length,
+    deaths: [...causeCount.entries()]
+      .map(([cause, count]) => ({ cause, count }))
+      .sort((a, b) => b.count - a.count),
     depth: quantiles(depths),
     turns: quantiles(results.map((r) => r.turns)),
     level: quantiles(results.map((r) => r.level)),
@@ -136,6 +173,19 @@ export function formatReport(s: Summary, label = ''): string {
       ['スコア', ...q(s.score)],
     ],
   ));
+  out.push('');
+
+  out.push('ボスと到達率');
+  const reachAt = (d: number): string => {
+    const row = s.reachRate.find((r) => r.depth === d);
+    return row ? pct(row.rate) : '-';
+  };
+  out.push(`  B5 到達 ${reachAt(5)} / B10 到達 ${reachAt(10)} / B20 到達 ${reachAt(20)} / B30 到達 ${reachAt(30)}`);
+  out.push(`  ボス階に着いた ${s.boss.seen} 回 / 倒した ${s.boss.killed} 回 (${pct(s.boss.rate)})`);
+  out.push(`  クリア ${s.cleared} 回`);
+  if (s.deaths.length > 0) {
+    out.push(`  死因: ${s.deaths.map((d) => `${d.cause} ${d.count}`).join(' / ')}`);
+  }
   out.push('');
 
   out.push('到達階の分布');

@@ -46,9 +46,13 @@ describe('rollEffect', () => {
     }
   });
 
-  it('青は必ず回復になる', () => {
+  it('青は必ず立て直しになる (HP とスタミナが戻る)', () => {
     const rng = new Rng(hashSeed('BLUE'));
-    for (let i = 0; i < 200; i++) expect(rollEffect(rng, 'blue').kind).toBe('healHp');
+    for (let i = 0; i < 200; i++) {
+      const e = rollEffect(rng, 'blue');
+      expect(e.kind).toBe('rest');
+      if (e.kind === 'rest') expect(e.stamina).toBeGreaterThan(0);
+    }
   });
 
   it('赤はマイナスもプラスも出る', () => {

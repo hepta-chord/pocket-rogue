@@ -137,15 +137,29 @@ describe('MONSTERS', () => {
     expect(def.passives).not.toContain('fast');
   });
 
-  it('bounty を省くと経験値と同じ値になる', () => {
-    expect(bountyFor(MONSTERS.goblin, MONSTERS.goblin.minDepth)).toBe(MONSTERS.goblin.xp);
+  it('bounty を省くと経験値と同じ倍率で伸びる', () => {
+    expect(bountyFor(MONSTERS.goblin, 5)).toBe(xpFor(MONSTERS.goblin, 5));
   });
 
   it('同じ敵でも階が深いほど経験値が増える', () => {
     const def = MONSTERS.goblin;
-    expect(xpFor(def, def.minDepth)).toBe(def.xp);
-    expect(xpFor(def, def.minDepth + 5)).toBeGreaterThan(def.xp);
-    expect(xpFor(def, def.maxDepth)).toBeGreaterThan(xpFor(def, def.minDepth + 5));
+    expect(xpFor(def, 5)).toBeGreaterThan(def.xp);
+    expect(xpFor(def, 10)).toBeGreaterThan(xpFor(def, 5));
+  });
+
+  it('グレードの切り替わりで 1 体の経験値が下がらない', () => {
+    const families = ['swarm', 'swift', 'warrior', 'odd', 'heavy'] as const;
+    for (const f of families) {
+      const byGrade = KINDS.filter((k) => MONSTERS[k].family === f).sort(
+        (a, b) => MONSTERS[a].grade - MONSTERS[b].grade,
+      );
+      for (let i = 0; i + 1 < byGrade.length; i++) {
+        const lower = MONSTERS[byGrade[i]];
+        const upper = MONSTERS[byGrade[i + 1]];
+        // 下のグレードの最深部と、上のグレードの初出を比べる
+        expect(xpFor(upper, upper.minDepth)).toBeGreaterThan(xpFor(lower, lower.maxDepth));
+      }
+    }
   });
 });
 

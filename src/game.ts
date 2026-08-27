@@ -97,15 +97,22 @@ export type TimedEffect = 'haste' | 'slow' | 'poison';
 const POISON_DAMAGE = 1;
 /** 毒を受けたときに乗る残りターン数 */
 const POISON_TURNS = 8;
+/**
+ * 毒の残りターン数の上限。
+ * 毒ネズミは 2〜4 匹の群れで出るので、上限が無いと 1 ターンに何度も重なって
+ * 避けようのない死因になる。
+ */
+const POISON_MAX_TURNS = 12;
 
 /** フロア内でこのターン数ごとに 1 体湧く */
 const SPAWN_INTERVAL = 45;
 /** 湧いた個体の経験値とドロップ率の倍率。0 にはせず、倒す価値は残す */
 const SPAWN_REWARD = 0.5;
+// 1 階の滞在は普通に探索しても 100〜120 ターンほどなので、その倍を超えたあたりから圧をかける
 /** 追う者の予告が出るフロア内ターン数 */
-const STALKER_WARN = 200;
+export const STALKER_WARN = 260;
 /** 追う者が現れるフロア内ターン数 */
-const STALKER_TURN = 240;
+export const STALKER_TURN = 320;
 
 /** 魔法。コストはスタミナで払う */
 export type SpellKind = 'thunder';
@@ -136,7 +143,7 @@ export interface StepResult {
   interrupt: boolean;
 }
 
-export const SAVE_VERSION = 13;
+export const SAVE_VERSION = 14;
 
 /**
  * 次のレベルまでに必要な経験値。
@@ -203,6 +210,8 @@ export interface GameState {
   staminaTick: number;
   /** 自然回復までの残りターン数 */
   regenTick: number;
+  /** 被弾でスタミナが減るまでの残り回数 */
+  hitTick: number;
   /** 身に着けている装備。持っていなければ null */
   weapon: Equipped | null;
   armor: Equipped | null;
@@ -231,17 +240,24 @@ const CLEAR_SPAN = 30;
 const CLEAR_BONUS = 1000;
 
 /** スタミナの初期最大値。イベント床で増減する */
-const STAMINA_MAX = 100;
+const STAMINA_MAX = 150;
 /** スタミナが 1 減るまでのターン数 */
-const STAMINA_DRAIN_TURNS = 5;
-/** 被弾 1 回で減るスタミナ。群れよけの盾を着ていると減らない */
-const STAMINA_PER_HIT = 1;
+const STAMINA_DRAIN_TURNS = 7;
+/**
+ * 被弾でスタミナが 1 減るまでの回数。群れよけの盾を着ていると減らない。
+ *
+ * 1 発ごとに 1 減らすと、これがスタミナ消費の 6 割を占めてしまい
+ * (1 run で 278 発、時間による消費 151 点に対して 278 点)、
+ * 死因の 9 割がスタミナ切れになっていた。
+ * 数発ごとに 1 減る形にして、時間による消費を主役に戻してある。
+ */
+const STAMINA_HITS_PER_POINT = 3;
 /** スタミナがある間、HP が 1 回復するまでのターン数 */
 const REGEN_TURNS = 6;
 /** スタミナが尽きている間、毎ターン減る HP */
 const STARVE_DAMAGE = 1;
 /** スタミナ薬 1 個で戻る量。フロア 1 つ分の消費より少し多い程度に抑える */
-const ELIXIR_STAMINA = 30;
+const ELIXIR_STAMINA = 40;
 
 export function newGame(seed: string): GameState {
   const rng = new Rng(hashSeed(seed));
@@ -275,6 +291,7 @@ export function newGame(seed: string): GameState {
     staminaMax: STAMINA_MAX,
     staminaTick: STAMINA_DRAIN_TURNS,
     regenTick: REGEN_TURNS,
+    hitTick: STAMINA_HITS_PER_POINT,
     weapon: null,
     armor: null,
     visible: [],
@@ -688,9 +705,18 @@ export function applyFloorEffect(state: GameState, effect: FloorEffect): void {
       pushLog(state, 'player', heal > 0 ? `HP が ${heal} 回復した。` : '傷は無かった。');
       return;
     }
+    case 'rest': {
+      const heal = p.maxHp - p.hp;
+      p.hp = p.maxHp;
+      const gain = Math.min(state.staminaMax - state.stamina, effect.stamina);
+      state.stamina += gain;
+      pushLog(state, 'player', `深く息をついた。HP が ${heal}、スタミナが ${gain} 戻った。`);
+      return;
+    }
     case 'damage': {
       const dmg = damageAmount(state, effect.size);
       p.hp -= dmg;
+      notifyDamage({ to: 'player', depth: state.depth, from: 'floor', roll: dmg, dealt: dmg });
       pushLog(state, 'enemy', `毒気に当てられた。${dmg} のダメージ。`);
       return;
     }
@@ -903,12 +929,15 @@ export function revealMap(state: GameState): void {
  * GameState に持たせるとセーブに載って形式が変わるので、モジュール変数に置いている。
  * 本編では誰も登録しないので、常に null のまま何も起きない。
  */
+/** ダメージの出どころ。敵の攻撃以外も区別できるようにしてある */
+export type DamageSource = ActorKind | 'poison' | 'starve' | 'floor';
+
 export interface DamageEvent {
   /** 誰が受けたか */
   to: 'player' | 'monster';
   depth: number;
   /** 攻撃した側 */
-  from: ActorKind;
+  from: DamageSource;
   /** 軽減する前の出目 */
   roll: number;
   /** 実際に通ったダメージ */
@@ -1104,8 +1133,9 @@ function monsterAttack(state: GameState, rng: Rng, m: Actor, opts: { pierce?: bo
 
   // 群れよけの盾を着ていなければ、被弾のたびにスタミナが減る。
   // 数で押してくる相手ほどスタミナを削られるので、盾がその系統への備えになる
-  if (!armorHas(a, 'guard')) {
-    state.stamina = Math.max(0, state.stamina - STAMINA_PER_HIT);
+  if (!armorHas(a, 'guard') && --state.hitTick <= 0) {
+    state.hitTick = STAMINA_HITS_PER_POINT;
+    state.stamina = Math.max(0, state.stamina - 1);
   }
 
   // 棘鎧の反撃。高 HP で殴り合いになる重装に効く
@@ -1240,7 +1270,7 @@ function tryAction(state: GameState, rng: Rng, m: Actor, kind: ActionKind, dist:
       if (dist !== 1) return false;
       monsterAttack(state, rng, m, { label: `${name}の毒牙!` });
       if (p.hp <= 0) return true;
-      state.effects.poison = (state.effects.poison ?? 0) + POISON_TURNS;
+      state.effects.poison = Math.min(POISON_MAX_TURNS, (state.effects.poison ?? 0) + POISON_TURNS);
       pushLog(state, 'alert', '毒が回った。しばらく HP が減り続ける。');
       return true;
     }
@@ -1410,6 +1440,7 @@ const EFFECT_END: Record<TimedEffect, string> = {
 function tickEffects(state: GameState): void {
   if (state.effects.poison) {
     state.player.hp -= POISON_DAMAGE;
+    notifyDamage({ to: 'player', depth: state.depth, from: 'poison', roll: POISON_DAMAGE, dealt: POISON_DAMAGE });
   }
   for (const key of ['haste', 'slow', 'poison'] as TimedEffect[]) {
     const left = state.effects[key];
@@ -1455,6 +1486,7 @@ function tickStamina(state: GameState): void {
   // 尽きている間は自然回復が止まり、行動のたびに HP が減る
   state.regenTick = REGEN_TURNS;
   p.hp -= STARVE_DAMAGE;
+  notifyDamage({ to: 'player', depth: state.depth, from: 'starve', roll: STARVE_DAMAGE, dealt: STARVE_DAMAGE });
 }
 
 /** 外から 1 行足す (セーブを捨てた通知など、ゲームの外で起きたことを伝える) */
