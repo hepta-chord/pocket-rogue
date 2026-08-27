@@ -13,19 +13,44 @@ export interface Room {
   h: number;
 }
 
+/**
+ * 階の作り。
+ * - rooms: 部屋 + 通路。既定の形
+ * - bigRoom: 大部屋 1 つ。見通しがよく、逃げ場がない
+ * - maze: 部屋を作らず通路だけ。曲がり角の連続になる
+ */
+export type MapKind = 'rooms' | 'bigRoom' | 'maze';
+
 export interface GameMap {
+  kind: MapKind;
   width: number;
   height: number;
   tiles: Tile[];
+  /** maze では空になる。配置は randomFloorTile を使う */
   rooms: Room[];
+  /** プレイヤーが降り立つ位置 */
+  start: { x: number; y: number };
   /**
    * 部屋どうしの接続。部屋の添字の組。
    * 枝の末端 (接続が 1 本だけの部屋) を行き止まりとして扱い、
    * モンスターハウスのような「入らなければ安全」な部屋を置く場所に使う。
    */
   links: [number, number][];
-  /** 階段のある部屋の添字 */
+  /** 階段のある部屋の添字。部屋が無い作りでは -1 */
   stairsRoom: number;
+}
+
+/**
+ * 歩ける床をランダムに 1 マス選ぶ。
+ * 部屋の無い作り (迷路) でも同じ手順で配置できるように、部屋ではなく床から選ぶ。
+ */
+export function randomFloorTile(rng: Rng, map: GameMap): { x: number; y: number } | null {
+  for (let tries = 0; tries < 200; tries++) {
+    const x = rng.int(1, map.width - 2);
+    const y = rng.int(1, map.height - 2);
+    if (map.tiles[idx(map, x, y)] === Tile.Floor) return { x, y };
+  }
+  return null;
 }
 
 export function idx(map: GameMap, x: number, y: number): number {
@@ -126,22 +151,107 @@ const ROOM_ATTEMPTS = 200;
  *
  * 階段は開始地点から最も遠い部屋に置く。
  */
-export function generateMap(rng: Rng, width: number, height: number): GameMap {
+export function generateMap(rng: Rng, width: number, height: number, kind: MapKind = 'rooms'): GameMap {
+  if (kind === 'bigRoom') return generateBigRoom(rng, width, height);
+  if (kind === 'maze') return generateMaze(rng, width, height);
   for (;;) {
     const map = tryGenerate(rng, width, height);
     if (map.rooms.length >= 2) return map;
   }
 }
 
-function tryGenerate(rng: Rng, width: number, height: number): GameMap {
-  const map: GameMap = {
+function emptyMap(kind: MapKind, width: number, height: number): GameMap {
+  return {
+    kind,
     width,
     height,
     tiles: new Array<Tile>(width * height).fill(Tile.Wall),
     rooms: [],
+    start: { x: 1, y: 1 },
     links: [],
-    stairsRoom: 0,
+    stairsRoom: -1,
   };
+}
+
+/**
+ * 大部屋。盤面のほとんどを 1 つの部屋にする。
+ * 見通しがよく敵の位置は全部分かるが、通路に逃げ込めない。
+ */
+function generateBigRoom(rng: Rng, width: number, height: number): GameMap {
+  const map = emptyMap('bigRoom', width, height);
+  const room: Room = { x: 2, y: 2, w: width - 4, h: height - 4 };
+  carveRoom(map, room);
+  map.rooms = [room];
+  map.stairsRoom = 0;
+  map.start = roomCenter(room);
+
+  // 階段は中央から離した隅寄りに置く。降りた瞬間に降りられると大部屋の意味がない
+  const corners = [
+    { x: room.x + 1, y: room.y + 1 },
+    { x: room.x + room.w - 2, y: room.y + 1 },
+    { x: room.x + 1, y: room.y + room.h - 2 },
+    { x: room.x + room.w - 2, y: room.y + room.h - 2 },
+  ];
+  const at = rng.pick(corners);
+  map.tiles[idx(map, at.x, at.y)] = Tile.StairsDown;
+  return map;
+}
+
+/**
+ * 迷路。部屋を作らず通路だけで構成する。
+ * 奇数座標を格子点にした穴掘り法で、行き止まりの多い一本道になる。
+ */
+function generateMaze(rng: Rng, width: number, height: number): GameMap {
+  const map = emptyMap('maze', width, height);
+  const start = { x: 1, y: 1 };
+  map.tiles[idx(map, start.x, start.y)] = Tile.Floor;
+
+  const stack = [start];
+  const dirs = [
+    [0, -2],
+    [0, 2],
+    [-2, 0],
+    [2, 0],
+  ];
+  while (stack.length > 0) {
+    const cur = stack[stack.length - 1];
+    const options = dirs
+      .map(([dx, dy]) => ({ dx, dy, nx: cur.x + dx, ny: cur.y + dy }))
+      .filter(
+        (o) =>
+          o.nx > 0 && o.ny > 0 && o.nx < width - 1 && o.ny < height - 1 && map.tiles[idx(map, o.nx, o.ny)] === Tile.Wall,
+      );
+    if (options.length === 0) {
+      stack.pop();
+      continue;
+    }
+    const pick = rng.pick(options);
+    map.tiles[idx(map, cur.x + pick.dx / 2, cur.y + pick.dy / 2)] = Tile.Floor;
+    map.tiles[idx(map, pick.nx, pick.ny)] = Tile.Floor;
+    stack.push({ x: pick.nx, y: pick.ny });
+  }
+
+  map.start = start;
+  // 階段は開始地点から最も遠い床に置く
+  let best = start;
+  let bestDist = -1;
+  for (let y = 1; y < height - 1; y++) {
+    for (let x = 1; x < width - 1; x++) {
+      if (map.tiles[idx(map, x, y)] !== Tile.Floor) continue;
+      const d = Math.abs(x - start.x) + Math.abs(y - start.y);
+      if (d > bestDist) {
+        bestDist = d;
+        best = { x, y };
+      }
+    }
+  }
+  map.tiles[idx(map, best.x, best.y)] = Tile.StairsDown;
+  return map;
+}
+
+function tryGenerate(rng: Rng, width: number, height: number): GameMap {
+  const map = emptyMap('rooms', width, height);
+  map.stairsRoom = 0;
 
   for (let attempt = 0; attempt < ROOM_ATTEMPTS && map.rooms.length < MAX_ROOMS; attempt++) {
     const w = rng.int(4, 9);
@@ -162,6 +272,7 @@ function tryGenerate(rng: Rng, width: number, height: number): GameMap {
   }
 
   if (map.rooms.length > 0) {
+    map.start = roomCenter(map.rooms[0]);
     map.stairsRoom = farthestRoom(map.rooms, 0);
     const c = roomCenter(map.rooms[map.stairsRoom]);
     map.tiles[idx(map, c.x, c.y)] = Tile.StairsDown;

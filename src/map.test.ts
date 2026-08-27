@@ -6,6 +6,7 @@ import {
   deadEndRooms,
   generateMap,
   idx,
+  randomFloorTile,
   roomDegrees,
   roomCenter,
   type GameMap,
@@ -20,6 +21,10 @@ function build(seed: string): GameMap {
 }
 
 /** 開始地点から歩いて届くマスを塗る。角の斜め移動の制限を守る */
+function isWalkableTile(map: GameMap, x: number, y: number): boolean {
+  return map.tiles[idx(map, x, y)] !== Tile.Wall;
+}
+
 function reachable(map: GameMap, from: { x: number; y: number }): Set<number> {
   const seen = new Set<number>([idx(map, from.x, from.y)]);
   const queue = [from];
@@ -44,6 +49,8 @@ function reachable(map: GameMap, from: { x: number; y: number }): Set<number> {
 describe('canStep', () => {
   // . = 床、# = 壁 の 3x3 を作る
   const grid = (rows: string[]): GameMap => ({
+    kind: 'rooms',
+    start: { x: 1, y: 1 },
     width: rows[0].length,
     height: rows.length,
     tiles: rows.flatMap((r) => [...r].map((c) => (c === '#' ? Tile.Wall : Tile.Floor))),
@@ -89,8 +96,74 @@ describe('canStep', () => {
   });
 });
 
+describe('階の作り', () => {
+  const kinds = ['rooms', 'bigRoom', 'maze'] as const;
+
+  function make(kind: (typeof kinds)[number], seed: string): GameMap {
+    return generateMap(new Rng(hashSeed(seed)), W, H, kind);
+  }
+
+  it('どの作りでも開始地点が歩ける床で、階段が 1 つある', () => {
+    for (const kind of kinds) {
+      for (let i = 0; i < 20; i++) {
+        const map = make(kind, `${kind}${i}`);
+        expect(map.kind).toBe(kind);
+        expect(isWalkableTile(map, map.start.x, map.start.y)).toBe(true);
+        expect(map.tiles.filter((t) => t === Tile.StairsDown)).toHaveLength(1);
+      }
+    }
+  });
+
+  it('どの作りでも開始地点から階段まで歩いて届く', () => {
+    for (const kind of kinds) {
+      for (let i = 0; i < 20; i++) {
+        const map = make(kind, `reach-${kind}${i}`);
+        const stairs = map.tiles.indexOf(Tile.StairsDown);
+        expect(reachable(map, map.start).has(stairs)).toBe(true);
+      }
+    }
+  });
+
+  it('大部屋は部屋が 1 つで、階段は開始地点と別の場所にある', () => {
+    for (let i = 0; i < 20; i++) {
+      const map = make('bigRoom', `big${i}`);
+      expect(map.rooms).toHaveLength(1);
+      const stairs = map.tiles.indexOf(Tile.StairsDown);
+      expect(stairs).not.toBe(idx(map, map.start.x, map.start.y));
+    }
+  });
+
+  it('迷路は部屋を持たず、行き止まりの部屋も無い', () => {
+    for (let i = 0; i < 20; i++) {
+      const map = make('maze', `maze${i}`);
+      expect(map.rooms).toHaveLength(0);
+      expect(deadEndRooms(map)).toHaveLength(0);
+    }
+  });
+
+  it('迷路は部屋より通路が細い (床の割合が低い)', () => {
+    const ratio = (map: GameMap): number =>
+      map.tiles.filter((t) => t !== Tile.Wall).length / map.tiles.length;
+    expect(ratio(make('maze', 'm1'))).toBeLessThan(ratio(make('bigRoom', 'b1')));
+  });
+
+  it('randomFloorTile は歩ける床だけを返す', () => {
+    for (const kind of kinds) {
+      const map = make(kind, `rf-${kind}`);
+      const rng = new Rng(hashSeed('pick'));
+      for (let i = 0; i < 200; i++) {
+        const at = randomFloorTile(rng, map);
+        expect(at).not.toBeNull();
+        if (at) expect(map.tiles[idx(map, at.x, at.y)]).toBe(Tile.Floor);
+      }
+    }
+  });
+});
+
 describe('canDetour', () => {
   const grid = (rows: string[]): GameMap => ({
+    kind: 'rooms',
+    start: { x: 1, y: 1 },
     width: rows[0].length,
     height: rows.length,
     tiles: rows.flatMap((r) => [...r].map((c) => (c === '#' ? Tile.Wall : Tile.Floor))),

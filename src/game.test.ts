@@ -24,6 +24,13 @@ function play(seed: string, actions: Action[]): GameState {
 
 const WAIT: Action = { type: 'wait' };
 
+/**
+ * 必中の武器。
+ * 命中判定が入ったので、当たる前提のテストは運に左右される。
+ * 韋駄天突きは命中 100% なので、これを持たせて結果を固定する。
+ */
+const SURE_HIT = { id: 'swiftSpear', power: 1 } as const;
+
 describe('newGame', () => {
   it('B1 から始まり、歩ける場所に立っている', () => {
     const s = newGame('START1');
@@ -148,6 +155,7 @@ describe('レベルアップ', () => {
 
     s.xp = xpToNext(s.level) - 1;
     s.player.hp = 1;
+    s.weapon = SURE_HIT;
     const maxBefore = s.player.maxHp;
     const levelBefore = s.level;
 
@@ -170,6 +178,7 @@ describe('レベルアップ', () => {
     m.hp = 1;
     m.def = 0;
     s.xp = xpToNext(s.level) - 1;
+    s.weapon = SURE_HIT;
 
     step(s, { type: 'move', dx: m.x - s.player.x, dy: m.y - s.player.y });
 
@@ -198,6 +207,7 @@ describe('ログ', () => {
     m.y = spot.y;
     m.hp = 999;
     m.maxHp = 999;
+    s.weapon = SURE_HIT;
     step(s, { type: 'move', dx: m.x - s.player.x, dy: m.y - s.player.y });
     const hit = s.log.find((l) => l.kind === 'player' && l.text.includes('のダメージ'));
     expect(hit?.text).toMatch(/残り \d+/);
@@ -647,6 +657,7 @@ describe('長居への対策', () => {
       m.evasion = 0;
       m.spawned = mark;
       s.monsters = [m];
+      s.weapon = SURE_HIT;
       const before = s.score;
       step(s, { type: 'move', dx: m.x - s.player.x, dy: m.y - s.player.y });
       return s.score - before;
@@ -711,6 +722,7 @@ describe('擬態', () => {
     m.hp = 999;
     m.maxHp = 999;
     s.monsters = [m];
+    s.weapon = SURE_HIT;
     step(s, { type: 'move', dx: m.x - s.player.x, dy: m.y - s.player.y });
     expect(m.revealed).toBe(true);
     expect(isDisguised(m)).toBe(false);

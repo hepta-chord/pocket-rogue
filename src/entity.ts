@@ -1,5 +1,5 @@
 import type { GameMap } from './map';
-import { Tile, idx, isWalkable } from './map';
+import { Tile, idx, isWalkable, randomFloorTile } from './map';
 import type { Rng } from './rng';
 
 // 敵は 5 系統 × 3 グレード + ボスの 16 種。
@@ -296,13 +296,11 @@ export function spawnOne(
   if (pool.length === 0) return null;
 
   for (let tries = 0; tries < 40; tries++) {
-    const room = rng.pick(map.rooms);
-    const x = rng.int(room.x, room.x + room.w - 1);
-    const y = rng.int(room.y, room.y + room.h - 1);
-    if (map.tiles[idx(map, x, y)] !== Tile.Floor) continue;
-    if (!allowed(x, y)) continue;
-    if (occupied.some((m) => m.x === x && m.y === y)) continue;
-    return createMonster(weightedPick(rng, pool), depth, x, y, nextId());
+    const at = randomFloorTile(rng, map);
+    if (!at) break;
+    if (!allowed(at.x, at.y)) continue;
+    if (occupied.some((m) => m.x === at.x && m.y === at.y)) continue;
+    return createMonster(weightedPick(rng, pool), depth, at.x, at.y, nextId());
   }
   return null;
 }
@@ -318,13 +316,11 @@ export function placeMonster(
   allowed: (x: number, y: number) => boolean,
 ): Actor | null {
   for (let tries = 0; tries < 60; tries++) {
-    const room = rng.pick(map.rooms);
-    const x = rng.int(room.x, room.x + room.w - 1);
-    const y = rng.int(room.y, room.y + room.h - 1);
-    if (map.tiles[idx(map, x, y)] !== Tile.Floor) continue;
-    if (!allowed(x, y)) continue;
-    if (occupied.some((m) => m.x === x && m.y === y)) continue;
-    return createMonster(kind, depth, x, y, nextId());
+    const at = randomFloorTile(rng, map);
+    if (!at) break;
+    if (!allowed(at.x, at.y)) continue;
+    if (occupied.some((m) => m.x === at.x && m.y === at.y)) continue;
+    return createMonster(kind, depth, at.x, at.y, nextId());
   }
   return null;
 }
@@ -346,13 +342,11 @@ function findSpot(
   occupied: Actor[],
 ): { x: number; y: number } | null {
   for (let tries = 0; tries < 50; tries++) {
-    const room = rng.pick(map.rooms);
-    const x = rng.int(room.x, room.x + room.w - 1);
-    const y = rng.int(room.y, room.y + room.h - 1);
-    if (map.tiles[idx(map, x, y)] !== Tile.Floor) continue;
-    if (Math.max(Math.abs(x - avoid.x), Math.abs(y - avoid.y)) < 6) continue;
-    if (occupied.some((m) => m.x === x && m.y === y)) continue;
-    return { x, y };
+    const at = randomFloorTile(rng, map);
+    if (!at) break;
+    if (Math.max(Math.abs(at.x - avoid.x), Math.abs(at.y - avoid.y)) < 6) continue;
+    if (occupied.some((m) => m.x === at.x && m.y === at.y)) continue;
+    return at;
   }
   return null;
 }

@@ -6,7 +6,7 @@
 // 効果の中身はここが持ち、実際にどう適用するかは game.ts が受け持つ。
 // 深さや装備を見る必要があるのは適用側だけなので、この表は数値と種類だけを持つ。
 
-import { Tile, canDetour, idx, type GameMap } from './map';
+import { canDetour, randomFloorTile, type GameMap } from './map';
 import type { Rng } from './rng';
 
 export type FloorKind = 'green' | 'yellow' | 'red' | 'blue';
@@ -153,14 +153,12 @@ function findSpot(
   needDetour: boolean,
 ): { x: number; y: number } | null {
   for (let tries = 0; tries < 60; tries++) {
-    const room = rng.pick(map.rooms);
-    const x = rng.int(room.x, room.x + room.w - 1);
-    const y = rng.int(room.y, room.y + room.h - 1);
-    if (map.tiles[idx(map, x, y)] !== Tile.Floor) continue;
-    if (x === start.x && y === start.y) continue;
-    if (occupied.some((o) => o.x === x && o.y === y)) continue;
-    if (needDetour && !canDetour(map, start, stairs, { x, y })) continue;
-    return { x, y };
+    const at = randomFloorTile(rng, map);
+    if (!at) break;
+    if (at.x === start.x && at.y === start.y) continue;
+    if (occupied.some((o) => o.x === at.x && o.y === at.y)) continue;
+    if (needDetour && !canDetour(map, start, stairs, at)) continue;
+    return at;
   }
   return null;
 }

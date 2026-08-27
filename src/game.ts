@@ -44,12 +44,26 @@ import {
   itemLabel,
   makeEquipItem,
   pickDropEquip,
+  pickFloorEquip,
   spawnItems,
   type ConsumableKind,
   type Inventory,
   type Item,
 } from './items';
-import { Tile, canStep, generateMap, idx, inBounds, isWalkable, roomCenter, tileAt, type GameMap } from './map';
+import {
+  Tile,
+  canStep,
+  deadEndRooms,
+  generateMap,
+  idx,
+  inBounds,
+  isWalkable,
+  randomFloorTile,
+  tileAt,
+  type GameMap,
+  type MapKind,
+  type Room,
+} from './map';
 import { Rng, hashSeed } from './rng';
 import type {
   CellKind,
@@ -116,7 +130,7 @@ export interface StepResult {
   interrupt: boolean;
 }
 
-export const SAVE_VERSION = 12;
+export const SAVE_VERSION = 13;
 
 /**
  * 次のレベルまでに必要な経験値。
@@ -164,6 +178,12 @@ export interface GameState {
   floorTurn: number;
   /** 追う者を呼んだか。1 階に 1 度だけ */
   stalkerCalled: boolean;
+  /** 視界が狭い階 */
+  dark: boolean;
+  /** モンスターハウスのある部屋の添字。無ければ -1 */
+  houseRoom: number;
+  /** ハウスがまだ起動していないか */
+  houseArmed: boolean;
   /** 持っている消耗品の数 */
   inventory: Inventory;
   /** 確認待ち。null なら通常の操作を受け付ける */
@@ -189,6 +209,8 @@ export interface GameState {
 const MAP_W = 40;
 const MAP_H = 30;
 const FOV_RADIUS = 7;
+/** 暗い階の視界。数マス先しか見えない */
+const DARK_FOV_RADIUS = 3;
 const LOG_MAX = 30;
 /** レベルアップで増える最大 HP */
 const LEVEL_HP = 3;
@@ -220,7 +242,7 @@ export function newGame(seed: string): GameState {
     xp: 0,
     score: 0,
     recorded: false,
-    map: { width: 0, height: 0, tiles: [], rooms: [], links: [], stairsRoom: 0 },
+    map: { kind: 'rooms', width: 0, height: 0, tiles: [], rooms: [], start: { x: 0, y: 0 }, links: [], stairsRoom: 0 },
     player: createPlayer(0, 0),
     monsters: [],
     items: [],
@@ -228,6 +250,9 @@ export function newGame(seed: string): GameState {
     effects: {},
     floorTurn: 0,
     stalkerCalled: false,
+    dark: false,
+    houseRoom: -1,
+    houseArmed: false,
     inventory: emptyInventory(),
     prompt: null,
     stamina: STAMINA_MAX,
@@ -275,6 +300,7 @@ export function step(state: GameState, action: Action): StepResult {
       p.x = nx;
       p.y = ny;
       entered = true;
+      checkHouse(state);
       if (stepOnFloor(state, rng)) interrupt = true;
       if (pickUp(state)) interrupt = true;
     } else {
@@ -445,11 +471,12 @@ export function visibleMonsters(state: GameState): Actor[] {
 
 function descend(state: GameState, rng: Rng): void {
   state.depth++;
-  state.map = generateMap(rng, MAP_W, MAP_H);
-  const start = roomCenter(state.map.rooms[0]);
+  state.map = generateMap(rng, MAP_W, MAP_H, pickMapKind(rng, state.depth));
+  const start = state.map.start;
   const p = state.player;
   p.x = start.x;
   p.y = start.y;
+  state.dark = state.depth >= 4 && rng.chance(0.15);
 
   // 階層そのものでは強くならない。伸びるのは経験値だけである。
   // 降りたときの回復はスタミナの自然回復に置き換えたので、ここでは回復しない
@@ -464,10 +491,82 @@ function descend(state: GameState, rng: Rng): void {
   state.effects = {};
   state.floorTurn = 0;
   state.stalkerCalled = false;
+  placeHouse(state, rng);
   state.visible = new Array<number>(MAP_W * MAP_H).fill(0);
   state.explored = new Array<number>(MAP_W * MAP_H).fill(0);
   updateFov(state);
   pushLog(state, 'info', state.depth === 1 ? 'B1。> を探して下に降りよう。' : `B${state.depth} に降りた。`);
+  for (const note of floorNotes(state)) pushLog(state, 'alert', note);
+}
+
+/**
+ * 階の作りを選ぶ。
+ * B1 と B2 は必ず普通の部屋にする。覚えることが多い最初の 2 階で変化球を出さない。
+ */
+function pickMapKind(rng: Rng, depth: number): MapKind {
+  if (depth <= 2) return 'rooms';
+  const roll = rng.next();
+  if (roll < 0.08) return 'bigRoom';
+  if (roll < 0.14) return 'maze';
+  return 'rooms';
+}
+
+/** 降りた直後に出す、その階の特色 */
+function floorNotes(state: GameState): string[] {
+  const notes: string[] = [];
+  if (state.map.kind === 'bigRoom') notes.push('大きな空洞だ。見通しはよいが、隠れる場所がない。');
+  if (state.map.kind === 'maze') notes.push('入り組んだ通路が続いている。');
+  if (state.dark) notes.push('暗い。数マス先しか見えない。');
+  return notes;
+}
+
+/**
+ * モンスターハウスを置く。
+ *
+ * 行き止まりの部屋にだけ置く。
+ * 階段までの経路上に出ると迂回できず、「入らなければ安全、入れば報酬」という選択にならない。
+ */
+function placeHouse(state: GameState, rng: Rng): void {
+  state.houseRoom = -1;
+  state.houseArmed = false;
+  if (state.map.kind !== 'rooms' || state.depth < 4) return;
+  if (!rng.chance(0.18)) return;
+
+  const ends = deadEndRooms(state.map);
+  if (ends.length === 0) return;
+  const index = rng.pick(ends);
+  const room = state.map.rooms[index];
+
+  const extra = 4 + Math.floor(state.depth / 2);
+  for (let i = 0; i < extra; i++) {
+    const m = spawnOne(rng, state.map, state.depth, state.monsters, () => state.nextId++, (x, y) =>
+      inRoom(room, x, y),
+    );
+    if (m) state.monsters.push(m);
+  }
+  for (let i = 0; i < 3; i++) {
+    const at = randomFloorTile(rng, state.map);
+    if (!at || !inRoom(room, at.x, at.y)) continue;
+    if (state.items.some((it) => it.x === at.x && it.y === at.y)) continue;
+    const slot: EquipSlot = rng.chance(0.5) ? 'weapon' : 'armor';
+    state.items.push(makeEquipItem(rng, pickFloorEquip(rng, slot), state.depth, at.x, at.y));
+  }
+
+  state.houseRoom = index;
+  state.houseArmed = true;
+}
+
+function inRoom(room: Room, x: number, y: number): boolean {
+  return x >= room.x && y >= room.y && x < room.x + room.w && y < room.y + room.h;
+}
+
+/** ハウスの部屋に入ったら起動する */
+function checkHouse(state: GameState): void {
+  if (!state.houseArmed || state.houseRoom < 0) return;
+  const room = state.map.rooms[state.houseRoom];
+  if (!inRoom(room, state.player.x, state.player.y)) return;
+  state.houseArmed = false;
+  pushLog(state, 'alert', '部屋中の敵が一斉にこちらを向いた。');
 }
 
 // ---------------------------------------------------------------------------
@@ -1144,7 +1243,8 @@ function occupied(state: GameState, x: number, y: number): boolean {
 // ---------------------------------------------------------------------------
 
 function updateFov(state: GameState): void {
-  computeFov(state.map, state.player.x, state.player.y, FOV_RADIUS, state.visible);
+  const radius = state.dark ? DARK_FOV_RADIUS : FOV_RADIUS;
+  computeFov(state.map, state.player.x, state.player.y, radius, state.visible);
   for (let i = 0; i < state.visible.length; i++) {
     if (state.visible[i] === 1) state.explored[i] = 1;
   }
@@ -1159,7 +1259,8 @@ function updateFov(state: GameState): void {
 function tickFloorPressure(state: GameState, rng: Rng): void {
   if (state.over) return;
 
-  if (state.floorTurn > 0 && state.floorTurn % SPAWN_INTERVAL === 0) {
+  // ハウスのある階は最初から敵が多いので、追加の湧きは止める
+  if (state.houseRoom < 0 && state.floorTurn > 0 && state.floorTurn % SPAWN_INTERVAL === 0) {
     const m = spawnOne(rng, state.map, state.depth, state.monsters, () => state.nextId++, (x, y) =>
       outOfSight(state, x, y),
     );

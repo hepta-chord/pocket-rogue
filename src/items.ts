@@ -8,7 +8,7 @@ import {
   type EquipId,
   type EquipSlot,
 } from './equip';
-import { Tile, idx, type GameMap } from './map';
+import { randomFloorTile, type GameMap } from './map';
 import type { Rng } from './rng';
 
 // アイテムの定義と配置。
@@ -170,14 +170,12 @@ function findSpot(
   items: Item[],
 ): { x: number; y: number } | null {
   for (let tries = 0; tries < 50; tries++) {
-    const room = rng.pick(map.rooms);
-    const x = rng.int(room.x, room.x + room.w - 1);
-    const y = rng.int(room.y, room.y + room.h - 1);
-    if (map.tiles[idx(map, x, y)] !== Tile.Floor) continue;
-    if (x === avoid.x && y === avoid.y) continue;
-    if (actors.some((a) => a.x === x && a.y === y)) continue;
-    if (items.some((it) => it.x === x && it.y === y)) continue;
-    return { x, y };
+    const at = randomFloorTile(rng, map);
+    if (!at) break;
+    if (at.x === avoid.x && at.y === avoid.y) continue;
+    if (actors.some((a) => a.x === at.x && a.y === at.y)) continue;
+    if (items.some((it) => it.x === at.x && it.y === at.y)) continue;
+    return at;
   }
   return null;
 }
