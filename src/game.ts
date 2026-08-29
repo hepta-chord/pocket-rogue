@@ -29,7 +29,7 @@ import {
   type MonsterKind,
 } from './entity';
 import { MONSTER_ROLL_FLOOR, PLAYER_ROLL_FLOOR, applyDefense, strike } from './combat';
-import { FLOORS, rollEffect, spawnFloors, type FloorEffect, type FloorTile, type Magnitude } from './floors';
+import { REST_STAMINA, spawnFloors, type FloorTile } from './floors';
 import { computeFov } from './fov';
 import {
   CRIT_CHANCE,
@@ -103,7 +103,7 @@ export type Action =
   | { type: 'cancel' };
 
 /** 残りターン数で切れる効果 */
-export type TimedEffect = 'haste' | 'slow' | 'poison' | 'root';
+export type TimedEffect = 'poison' | 'root';
 
 /** 毒が 1 ターンに与えるダメージ */
 const POISON_DAMAGE = 1;
@@ -143,6 +143,32 @@ export type SpellKind = 'thunder';
 export const SPELLS: Record<SpellKind, { name: string; cost: number }> = {
   thunder: { name: '雷', cost: 15 },
 };
+
+/**
+ * 雷が巻き込んだ数に応じて上乗せする威力。1 体ぶんは乗らない (単体は基礎威力のまま)。
+ *
+ * 通路に下がって 1 対 1 を作る戦術が有効なので、単体の敵に対しては
+ * わざわざスタミナを払う理由が薄い。数に応じて伸びる形にして、
+ * 群れに開けた場所で囲まれたときの立て直し札として機能させる。
+ */
+const THUNDER_GROUP_BONUS = 4;
+
+/**
+ * 消耗品を使うのに要るスタミナ。無い項目は 0 (無料) として扱う。
+ *
+ * 地図だけ有料にしてある。罠を避けるための下調べという性質上、
+ * 無料だと持っている限り気軽に使えてしまい、スタミナが余りがちな一因になっていた。
+ */
+const ITEM_STAMINA_COST: Partial<Record<ConsumableKind, number>> = { map: 20 };
+
+function itemStaminaCost(kind: ConsumableKind): number {
+  return ITEM_STAMINA_COST[kind] ?? 0;
+}
+
+/** 消耗品を使えるか。所持数とスタミナの両方を見る */
+export function canUseItem(state: GameState, kind: ConsumableKind): boolean {
+  return !state.over && state.inventory[kind] > 0 && state.stamina >= itemStaminaCost(kind);
+}
 
 export const SPELL_KINDS = Object.keys(SPELLS) as SpellKind[];
 
@@ -281,9 +307,9 @@ const CLEAR_SPAN = 30;
 const CLEAR_BONUS = 1000;
 
 /** スタミナの初期最大値。イベント床で増減する */
-const STAMINA_MAX = 150;
+const STAMINA_MAX = 250;
 /** スタミナが 1 減るまでのターン数 */
-const STAMINA_DRAIN_TURNS = 7;
+const STAMINA_DRAIN_TURNS = 12;
 /**
  * 被弾でスタミナが 1 減るまでの回数。群れよけの盾を着ていると減らない。
  *
@@ -392,15 +418,16 @@ export function step(state: GameState, action: Action): StepResult {
       checkHouse(state);
       // 罠を先に見る。落とし穴で階が変わると、以降の判定は新しい階のものになる
       if (stepOnTrap(state, rng)) interrupt = true;
-      if (stepOnFloor(state, rng)) interrupt = true;
+      if (stepOnFloor(state)) interrupt = true;
       if (pickUp(state)) interrupt = true;
     } else {
       state.rngState = rng.state;
       return none;
     }
   } else if (action.type === 'use') {
-    if (state.inventory[action.item] <= 0) return none;
+    if (!canUseItem(state, action.item)) return none;
     state.inventory[action.item]--;
+    state.stamina -= itemStaminaCost(action.item);
     useItem(state, action.item);
     interrupt = true;
   } else if (action.type === 'cast') {
@@ -555,11 +582,7 @@ export function promptText(state: GameState): { text: string; confirm: string; c
  * 追加の湧き、追跡者の出現判定は、すべてここに乗せる。
  */
 function endTurn(state: GameState, rng: Rng, opts: { enemies: boolean }): void {
-  if (opts.enemies) {
-    // 高速移動の間は 2 ターンに 1 回だけ敵が動き、鈍足の間は 2 回動く
-    const times = state.effects.slow ? 2 : state.effects.haste && state.turn % 2 === 1 ? 0 : 1;
-    for (let i = 0; i < times; i++) monstersAct(state, rng);
-  }
+  if (opts.enemies) monstersAct(state, rng);
   state.turn++;
   state.floorTurn++;
   tickEffects(state);
@@ -596,9 +619,11 @@ function descend(state: GameState, rng: Rng): void {
   state.monsters = spawnMonsters(rng, state.map, state.depth, start, () => state.nextId++);
   state.items = spawnItems(rng, state.map, state.depth, start, state.monsters);
   const stairsAt = stairsPos(state.map);
-  state.floors = stairsAt
-    ? spawnFloors(rng, state.map, state.depth, start, stairsAt, [...state.monsters, ...state.items])
-    : [];
+  state.floors = spawnFloors(rng, state.map, state.depth, start, [
+    ...state.monsters,
+    ...state.items,
+    ...(stairsAt ? [stairsAt] : []),
+  ]);
   state.traps = spawnTraps(rng, state.map, state.depth, start, [
     ...state.items,
     ...state.floors,
@@ -798,116 +823,22 @@ function applyTrap(state: GameState, rng: Rng, kind: TrapKind): void {
   }
 }
 
-function stepOnFloor(state: GameState, rng: Rng): boolean {
+function stepOnFloor(state: GameState): boolean {
   const p = state.player;
   const i = state.floors.findIndex((f) => f.x === p.x && f.y === p.y);
   if (i < 0) return false;
-  const floor = state.floors[i];
   state.floors.splice(i, 1);
 
-  const effect = rollEffect(rng, floor.kind);
-  pushLog(state, 'info', `${FLOORS[floor.kind].name}を踏んだ。`);
-  applyFloorEffect(state, effect);
+  // 休憩床。かつては色ごとに別の効果があったが、見えるイベントとして残すのは
+  // これだけにした (docs/refactor-plan.md 参照)。マイナス側は罠 (traps.ts) に一本化してある
+  const heal = p.maxHp - p.hp;
+  p.hp = p.maxHp;
+  const gain = Math.min(state.staminaMax - state.stamina, REST_STAMINA);
+  state.stamina += gain;
+  pushLog(state, 'player', `深く息をついた。HP が ${heal}、スタミナが ${gain} 戻った。`);
   return true;
 }
 
-/** 深さと最大 HP から、大きさの段階を実数に変える */
-function healAmount(state: GameState, size: Magnitude): number {
-  const max = state.player.maxHp;
-  if (size === 'small') return Math.max(3, Math.ceil(max / 5));
-  if (size === 'medium') return Math.max(5, Math.ceil(max / 3));
-  return max;
-}
-
-function damageAmount(state: GameState, size: Magnitude): number {
-  const base = 2 + Math.floor(state.depth / 3);
-  return size === 'small' ? base : size === 'medium' ? base * 2 : base * 3;
-}
-
-function xpAmount(state: GameState, size: Magnitude): number {
-  const base = xpToNext(state.level);
-  return Math.max(1, Math.ceil(base * (size === 'small' ? 0.2 : size === 'medium' ? 0.4 : 0.8)));
-}
-
-/** 効果を 1 つ適用する。踏んだときのほか、テストからも呼ぶ */
-export function applyFloorEffect(state: GameState, effect: FloorEffect): void {
-  const p = state.player;
-  switch (effect.kind) {
-    case 'healHp': {
-      const heal = Math.min(p.maxHp - p.hp, healAmount(state, effect.size));
-      p.hp += heal;
-      pushLog(state, 'player', heal > 0 ? `HP が ${heal} 回復した。` : '傷は無かった。');
-      return;
-    }
-    case 'rest': {
-      const heal = p.maxHp - p.hp;
-      p.hp = p.maxHp;
-      const gain = Math.min(state.staminaMax - state.stamina, effect.stamina);
-      state.stamina += gain;
-      pushLog(state, 'player', `深く息をついた。HP が ${heal}、スタミナが ${gain} 戻った。`);
-      return;
-    }
-    case 'damage': {
-      const dmg = damageAmount(state, effect.size);
-      p.hp -= dmg;
-      notifyDamage({ to: 'player', depth: state.depth, from: 'floor', roll: dmg, dealt: dmg });
-      pushLog(state, 'enemy', `毒気に当てられた。${dmg} のダメージ。`);
-      return;
-    }
-    case 'restoreStamina': {
-      const gain = Math.min(state.staminaMax - state.stamina, effect.amount);
-      state.stamina += gain;
-      pushLog(state, 'player', `スタミナが ${gain} 戻った。`);
-      return;
-    }
-    case 'gainXp': {
-      const amount = xpAmount(state, effect.size);
-      pushLog(state, 'player', `経験値が ${amount} 入った。`);
-      gainXp(state, amount);
-      return;
-    }
-    case 'boostAtk':
-      p.atk += effect.amount;
-      pushLog(state, 'player', `力がみなぎる。攻撃力が ${effect.amount} 上がった。`);
-      return;
-    case 'boostDef':
-      p.def += effect.amount;
-      pushLog(state, 'player', `体が硬くなった。防御力が ${effect.amount} 上がった。`);
-      return;
-    case 'boostStaminaMax':
-      state.staminaMax += effect.amount;
-      state.stamina += effect.amount;
-      pushLog(state, 'player', `スタミナの最大値が ${effect.amount} 増えた。`);
-      return;
-    case 'drainStaminaMax': {
-      // 最大値が 0 になると即死になるので下限を残す
-      const lost = Math.min(effect.amount, state.staminaMax - 20);
-      if (lost <= 0) {
-        pushLog(state, 'info', '何も起きなかった。');
-        return;
-      }
-      state.staminaMax -= lost;
-      state.stamina = Math.min(state.stamina, state.staminaMax);
-      pushLog(state, 'alert', `スタミナの最大値が ${lost} 減った。`);
-      return;
-    }
-    case 'corrode':
-      corrode(state);
-      return;
-    case 'haste':
-      state.effects.haste = (state.effects.haste ?? 0) + effect.turns;
-      pushLog(state, 'player', '体が軽い。しばらく敵より速く動ける。');
-      return;
-    case 'slow':
-      state.effects.slow = (state.effects.slow ?? 0) + effect.turns;
-      pushLog(state, 'alert', '足が重い。しばらく敵に余計に動かれる。');
-      return;
-    case 'reveal':
-      revealMap(state);
-      pushLog(state, 'player', 'この階の地形が頭に浮かんだ。');
-      return;
-  }
-}
 
 /**
  * 腐食。装備の強さを 1 下げる。
@@ -1031,7 +962,10 @@ function castSpell(state: GameState, rng: Rng, spell: SpellKind): void {
         pushLog(state, 'player', '雷を放ったが、周りに敵はいなかった。');
         return;
       }
-      const dmg = 6 + state.depth * 2;
+      // 単体のときの威力は据え置き、巻き込んだ数だけ上乗せする。
+      // 群れに囲まれてから 1 体ずつ削るより、まとめて晴らす方が得になるようにする。
+      // 通路に下がって 1 対 1 を作る戦術とぶつからないよう、単体では変わらない
+      const dmg = 6 + state.depth * 2 + THUNDER_GROUP_BONUS * (targets.length - 1);
       for (const m of targets) m.hp -= dmg;
       const dead = targets.filter((m) => m.hp <= 0);
       state.monsters = state.monsters.filter((m) => m.hp > 0);
@@ -1634,8 +1568,6 @@ function stairsDirection(state: GameState): string {
 
 const EFFECT_END: Record<TimedEffect, string> = {
   root: '足が自由になった。',
-  haste: '体の軽さが消えた。',
-  slow: '足の重さが取れた。',
   poison: '毒が抜けた。',
 };
 
@@ -1713,7 +1645,7 @@ function buildSlots(state: GameState): ViewSlot[] {
     ref: { kind: 'item', id: kind },
     label: ITEM_NAMES[kind],
     badge: String(state.inventory[kind]),
-    enabled: !state.over && state.inventory[kind] > 0,
+    enabled: canUseItem(state, kind),
   }));
   const spells: ViewSlot[] = SPELL_KINDS.map((kind) => ({
     ref: { kind: 'spell', id: kind },
@@ -1738,13 +1670,6 @@ const CELL_KIND: Record<Tile, CellKind> = {
   [Tile.StairsUp]: 'stairsUp',
 };
 
-const FLOOR_CELL: Record<FloorTile['kind'], CellKind> = {
-  green: 'floorGreen',
-  yellow: 'floorYellow',
-  red: 'floorRed',
-  blue: 'floorBlue',
-};
-
 /** 描画層に渡す、見た目を含まないデータに変換する */
 export function toViewModel(state: GameState): ViewModel {
   const { map } = state;
@@ -1757,11 +1682,11 @@ export function toViewModel(state: GameState): ViewModel {
     }
   }
 
-  // イベント床は地形の上に重ねる。一度見た場所のものは覚えておく
+  // 休憩床は地形の上に重ねる。一度見た場所のものは覚えておく
   for (const f of state.floors) {
     const i = idx(map, f.x, f.y);
     if (state.explored[i] !== 1) continue;
-    cells[i] = { kind: FLOOR_CELL[f.kind], vis: cells[i].vis };
+    cells[i] = { kind: 'floorRest', vis: cells[i].vis };
   }
 
   // 見つかった罠だけ重ねる。見つかっていないものは地形と区別が付かない

@@ -27,7 +27,6 @@ import {
   weaponAtk,
   type Equipped,
 } from '../equip';
-import type { FloorKind } from '../floors';
 import { isEquip, stackLimit, type ConsumableKind, type Item } from '../items';
 import { isChoke } from '../ai';
 import { canReach, canStep, idx, isWalkable, Tile } from '../map';
@@ -282,7 +281,7 @@ function decide(state: GameState, policy: Policy, memo: Memo): Action {
 
   // 傷ついていたら、立て直しの拠点である青い床を先に取りにいく
   if (ratio <= policy.healFloorAt) {
-    const heal = nearestFloorStep(state, 'blue', policy.itemRange);
+    const heal = nearestFloorStep(state, policy.itemRange);
     if (heal) return heal;
   }
 
@@ -401,10 +400,9 @@ function armorScore(e: Equipped | null): number {
   return armorDefense(e) + armorEvasion(e) * 4;
 }
 
-function nearestFloorStep(state: GameState, kind: FloorKind, range: number): Action | null {
-  const known = state.floors.filter(
-    (f) => f.kind === kind && state.explored[idx(state.map, f.x, f.y)] === 1,
-  );
+/** 休憩床 (床の種類は 1 つしかない) を目指す */
+function nearestFloorStep(state: GameState, range: number): Action | null {
+  const known = state.floors.filter((f) => state.explored[idx(state.map, f.x, f.y)] === 1);
   if (known.length === 0) return null;
   return bfsStep(state, known.map((f) => ({ x: f.x, y: f.y })), range);
 }

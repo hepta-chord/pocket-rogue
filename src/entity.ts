@@ -348,7 +348,10 @@ export function spawnMonsters(
       return d.weight > 0 && d.minDepth <= depth && depth <= d.maxDepth && (counts[k] ?? 0) < d.maxPerFloor;
     });
     if (pool.length === 0) break;
-    const kind = weightedPick(rng, pool);
+    // 抽選 1 回あたりの頭数 (pack の平均) で重みを割り引く。
+    // 割り引かないと、pack が大きい系統は「選ばれやすいうえに 1 回で頭数も稼ぐ」
+    // 二重取りになり、階の構成がその系統だけに偏る
+    const kind = weightedPick(rng, pool, (k) => MONSTERS[k].weight / packAvg(MONSTERS[k]));
     const def = MONSTERS[kind];
     const first = findSpot(rng, map, avoid, monsters);
     if (!first) continue;
@@ -390,7 +393,7 @@ export function spawnOne(
     if (!at) break;
     if (!allowed(at.x, at.y)) continue;
     if (occupied.some((m) => m.x === at.x && m.y === at.y)) continue;
-    return createMonster(weightedPick(rng, pool), depth, at.x, at.y, nextId());
+    return createMonster(weightedPick(rng, pool, (k) => MONSTERS[k].weight), depth, at.x, at.y, nextId());
   }
   return null;
 }
@@ -415,11 +418,16 @@ export function placeMonster(
   return null;
 }
 
-function weightedPick(rng: Rng, pool: MonsterKind[]): MonsterKind {
-  const total = pool.reduce((sum, k) => sum + MONSTERS[k].weight, 0);
+/** pack [min, max] の平均頭数 */
+function packAvg(def: MonsterDef): number {
+  return (def.pack[0] + def.pack[1]) / 2;
+}
+
+function weightedPick(rng: Rng, pool: MonsterKind[], weightOf: (k: MonsterKind) => number): MonsterKind {
+  const total = pool.reduce((sum, k) => sum + weightOf(k), 0);
   let r = rng.next() * total;
   for (const k of pool) {
-    r -= MONSTERS[k].weight;
+    r -= weightOf(k);
     if (r < 0) return k;
   }
   return pool[pool.length - 1];
