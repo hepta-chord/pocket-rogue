@@ -1,3 +1,4 @@
+import { chooseStep, distanceField } from './ai';
 import {
   BOSS,
   MONSTERS,
@@ -1196,6 +1197,8 @@ function trySplit(state: GameState, rng: Rng, m: Actor): void {
 
 function monstersAct(state: GameState, rng: Rng): void {
   const p = state.player;
+  // 距離場はこの呼び出しの間だけ使う。プレイヤーは動かないので作り直さなくてよい
+  const field = distanceField(state.map, p);
   for (const m of [...state.monsters]) {
     if (p.hp <= 0) return;
     if (!state.monsters.includes(m)) continue;
@@ -1208,14 +1211,14 @@ function monstersAct(state: GameState, rng: Rng): void {
     const actions = def.passives.includes('fast') ? 2 : 1;
     for (let i = 0; i < actions; i++) {
       // 攻撃や技を使ったらこのターンは終わり (俊敏でも攻撃は 1 回)
-      if (monsterTurn(state, rng, m, def)) break;
+      if (monsterTurn(state, rng, m, def, field)) break;
       if (p.hp <= 0) break;
     }
   }
 }
 
 /** 1 回分の行動。攻撃か技を使ったら true、移動だけなら false */
-function monsterTurn(state: GameState, rng: Rng, m: Actor, def: MonsterDef): boolean {
+function monsterTurn(state: GameState, rng: Rng, m: Actor, def: MonsterDef, field: Int32Array): boolean {
   const p = state.player;
   const dx = p.x - m.x;
   const dy = p.y - m.y;
@@ -1240,14 +1243,21 @@ function monsterTurn(state: GameState, rng: Rng, m: Actor, def: MonsterDef): boo
   }
 
   if (sees) {
-    // プレイヤーから見えている = 向こうからも見えているとみなして追ってくる
-    let sx = Math.sign(dx);
-    let sy = Math.sign(dy);
-    if (def.passives.includes('erratic') && rng.chance(0.5)) {
-      sx = rng.int(-1, 1);
-      sy = rng.int(-1, 1);
+    // プレイヤーから見えている = 向こうからも見えているとみなして追ってくる。
+    // 壁抜けは距離場の外を通れるので、素朴な寄せ方のままにする
+    if (def.passives.includes('phasing')) {
+      moveToward(state, m, Math.sign(dx), Math.sign(dy));
+    } else {
+      const spot = chooseStep(
+        { map: state.map, player: p, field, occupied: (x, y) => occupied(state, x, y), rng },
+        m,
+        def.passives.includes('erratic'),
+      );
+      if (spot) {
+        m.x = spot.x;
+        m.y = spot.y;
+      }
     }
-    moveToward(state, m, sx, sy);
   } else if (rng.chance(0.25)) {
     moveToward(state, m, rng.int(-1, 1), rng.int(-1, 1));
   }
