@@ -302,12 +302,39 @@ describe('確認プロンプト', () => {
     expect(s.prompt).toBeNull();
   });
 
-  it('取り消したあと、待機で確認をやり直せる', () => {
+  it('取り消したあとは、待機しても確認をやり直さない', () => {
+    // 断ったのに待つたび聞かれると、階段の上で休むことができない。
+    // 待機の長押しでスタミナを HP に換えてから降りる、という手が使えなくなる
     const s = newGame('PROMPT5');
     if (!walkToStairs(s)) return;
     step(s, { type: 'cancel' });
     expect(s.prompt).toBeNull();
-    step(s, WAIT);
+    for (let i = 0; i < 5; i++) {
+      step(s, WAIT);
+      expect(s.prompt).toBeNull();
+    }
+  });
+
+  it('階段から離れてまた乗れば、確認は出る', () => {
+    const s = newGame('PROMPT10');
+    if (!walkToStairs(s)) return;
+    step(s, { type: 'cancel' });
+
+    // 降りられる方向へ 1 歩出て、戻る
+    const away = [
+      [1, 0], [-1, 0], [0, 1], [0, -1],
+      [1, 1], [-1, -1], [1, -1], [-1, 1],
+    ] as const;
+    const from = { x: s.player.x, y: s.player.y };
+    const moved = away.find(([dx, dy]) => {
+      step(s, { type: 'move', dx, dy });
+      return s.player.x !== from.x || s.player.y !== from.y;
+    });
+    if (!moved) return;
+    // 出た先で装備や罠の確認が出ることがあるので、出ていたら断っておく
+    if (s.prompt) step(s, { type: 'cancel' });
+
+    step(s, { type: 'move', dx: from.x - s.player.x, dy: from.y - s.player.y });
     expect(s.prompt).toEqual({ kind: 'descend' });
   });
 

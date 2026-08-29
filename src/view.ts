@@ -16,7 +16,9 @@ export type CellKind =
   /** 休憩床。HP とスタミナを立て直せる */
   | 'floorRest'
   /** 見つかった罠。踏むまで見えない */
-  | 'trap';
+  | 'trap'
+  /** 見つかった落とし穴。次の階へ落ちるだけなので、他の罠と区別する */
+  | 'trapPit';
 export type Visibility = 'visible' | 'remembered' | 'unknown';
 
 export interface ViewCell {
