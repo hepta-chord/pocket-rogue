@@ -3,6 +3,7 @@ import { addLog, newGame, step, toViewModel, visibleMonsters, type Action, type 
 import { bestScore, loadScores, submitScore, today, type ScoreEntry } from './highscore';
 import { bindButtons, bindKeyboard } from './input';
 import type { Renderer } from './render/renderer';
+import { HELP, HELP_COLORS } from './render/help';
 import { TextRenderer } from './render/text-renderer';
 import { normalizeSeed, randomSeedString } from './rng';
 import { loadGame, saveGame } from './save';
@@ -21,6 +22,7 @@ const renderer: Renderer = new TextRenderer(canvas);
 const menu = byId<HTMLDialogElement>('menu');
 const gameover = byId<HTMLDialogElement>('gameover');
 const scores = byId<HTMLDialogElement>('scores');
+const help = byId<HTMLDialogElement>('help');
 const confirm = byId<HTMLDialogElement>('confirm');
 const seedInput = byId<HTMLInputElement>('seed-input');
 
@@ -132,6 +134,10 @@ function act(action: Action): boolean {
   if (state.over && !state.recorded) finishRun();
   saveGame(state);
   render();
+  // 待機の長押しは「休む」ための操作なので、HP が満タンになったら止める。
+  // 続けてもスタミナが減るだけで、スタミナを HP に換えるという目的から外れる
+  if (action.type === 'wait' && state.player.hp >= state.player.maxHp) return false;
+
   return (
     result.acted &&
     !result.interrupt &&
@@ -213,6 +219,59 @@ function reopenResult(): void {
 }
 
 // ---------------------------------------------------------------------------
+// 遊び方
+
+/**
+ * 文字の一覧を組み立てる。
+ *
+ * 中身は render/help.ts が持つ。文字と色を知っているのは描画層だけなので、
+ * ここは受け取ったものを DOM に置くだけにしてある。
+ * 一度組んだら変わらないので、初回だけ作る。
+ */
+function showHelp(): void {
+  const body = byId('help-body');
+  if (body.childElementCount === 0) {
+    for (const section of HELP) {
+      const h = document.createElement('h3');
+      h.textContent = section.title;
+      body.append(h);
+
+      if (section.rows.length > 0) {
+        const dl = document.createElement('dl');
+        for (const row of section.rows) {
+          const dt = document.createElement('dt');
+          dt.textContent = row.glyph.ch;
+          dt.style.color = row.glyph.fg;
+
+          const dd = document.createElement('dd');
+          const name = document.createElement('b');
+          name.textContent = row.name;
+          name.style.color = HELP_COLORS.name;
+          const note = document.createElement('small');
+          note.textContent = row.note;
+          note.style.color = HELP_COLORS.note;
+          dd.append(name, note);
+
+          dl.append(dt, dd);
+        }
+        body.append(dl);
+      }
+
+      if (section.notes) {
+        const ul = document.createElement('ul');
+        for (const text of section.notes) {
+          const li = document.createElement('li');
+          li.textContent = text;
+          ul.append(li);
+        }
+        body.append(ul);
+      }
+    }
+  }
+  help.showModal();
+}
+
+// ---------------------------------------------------------------------------
 // ハイスコア一覧
 
 function showScores(): void {
@@ -287,6 +346,11 @@ byId('new-game').addEventListener('click', () => {
   startGame(normalizeSeed(seedInput.value) || randomSeedString());
   menu.close();
 });
+byId('menu-help').addEventListener('click', () => {
+  menu.close();
+  showHelp();
+});
+byId('help-close').addEventListener('click', () => help.close());
 byId('menu-scores').addEventListener('click', () => {
   menu.close();
   showScores();
@@ -324,7 +388,8 @@ byId('scores-close').addEventListener('click', () => scores.close());
 // ---------------------------------------------------------------------------
 // 入力
 
-const dialogOpen = (): boolean => menu.open || gameover.open || scores.open || confirm.open;
+const dialogOpen = (): boolean =>
+  menu.open || gameover.open || scores.open || confirm.open || help.open;
 
 bindKeyboard(act, dialogOpen);
 bindButtons(byId('pad'), act);

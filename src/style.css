@@ -347,3 +347,64 @@ dialog .hint.small {
   font-size: 0.85rem;
   border: none;
 }
+
+/* --- 遊び方 --- */
+
+/* 長くなるので中身だけスクロールさせる。閉じるボタンは常に見える位置に残す */
+#help-body {
+  max-height: 60vh;
+  overflow-y: auto;
+  margin-bottom: 12px;
+  -webkit-overflow-scrolling: touch;
+}
+
+#help-body h3 {
+  margin: 12px 0 6px;
+  font-size: 0.9rem;
+  color: #ffd166;
+}
+
+#help-body h3:first-child {
+  margin-top: 0;
+}
+
+#help-body dl {
+  margin: 0;
+  display: grid;
+  /* 文字の列は幅を固定して、説明の行頭を揃える */
+  grid-template-columns: 1.4em 1fr;
+  gap: 4px 8px;
+  align-items: baseline;
+}
+
+#help-body dt {
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-weight: bold;
+  text-align: center;
+}
+
+#help-body dd {
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+#help-body dd b {
+  font-weight: 600;
+}
+
+#help-body dd small {
+  display: block;
+  font-size: 0.9em;
+  opacity: 0.7;
+}
+
+#help-body ul {
+  margin: 6px 0 0;
+  padding-left: 1.1em;
+  font-size: 0.85rem;
+  opacity: 0.85;
+}
+
+#help-body li {
+  margin-bottom: 4px;
+}

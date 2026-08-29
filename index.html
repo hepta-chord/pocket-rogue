@@ -45,6 +45,7 @@
       </div>
       <div class="row actions">
         <button type="button" id="new-game" class="primary">この seed で新しいゲーム</button>
+        <button type="button" id="menu-help">遊び方</button>
         <button type="button" id="menu-scores">ハイスコア</button>
         <button type="button" id="menu-close">閉じる</button>
       </div>
@@ -72,6 +73,15 @@
       <div class="row actions">
         <button type="button" id="confirm-yes" class="primary"></button>
         <button type="button" id="confirm-no"></button>
+      </div>
+    </dialog>
+
+    <dialog id="help">
+      <h2>遊び方</h2>
+      <!-- 中身は main.ts が render/help.ts から組み立てる -->
+      <div id="help-body"></div>
+      <div class="row actions">
+        <button type="button" id="help-close">閉じる</button>
       </div>
     </dialog>
 

@@ -195,7 +195,7 @@ export interface StepResult {
   interrupt: boolean;
 }
 
-export const SAVE_VERSION = 16;
+export const SAVE_VERSION = 17;
 
 /**
  * 次のレベルまでに必要な経験値。
@@ -273,6 +273,13 @@ export interface GameState {
   inventory: Inventory;
   /** 確認待ち。null なら通常の操作を受け付ける */
   prompt: Prompt | null;
+  /**
+   * 今いる階段で降りるのを断ったか。階段から離れると消える。
+   *
+   * 断るたびにまた聞かれると、階段の上で待って休むことができない。
+   * 装備を断ったときの印 (Item.declined) と同じ考え方である。
+   */
+  stairsDeclined: boolean;
   /** スタミナ。行動と被弾で減り、尽きると HP が削れる */
   stamina: number;
   staminaMax: number;
@@ -360,6 +367,7 @@ export function newGame(seed: string): GameState {
     cleared: false,
     inventory: emptyInventory(),
     prompt: null,
+    stairsDeclined: false,
     stamina: STAMINA_MAX,
     staminaMax: STAMINA_MAX,
     staminaTick: STAMINA_DRAIN_TURNS,
@@ -449,7 +457,9 @@ export function step(state: GameState, action: Action): StepResult {
   // その場で戦っている間も毎ターン出ると、確認が邪魔で戦えない。
   const tile = tileAt(state.map, p.x, p.y);
   const onStairs = tile === Tile.StairsDown || tile === Tile.StairsUp;
-  const asks = onStairs && (entered || action.type === 'wait');
+  // 階段から離れたら、断った印を消してまた聞くようにする
+  if (!onStairs) state.stairsDeclined = false;
+  const asks = onStairs && !state.stairsDeclined && (entered || action.type === 'wait');
   if (!state.over && !state.prompt && asks) {
     state.prompt = tile === Tile.StairsUp ? { kind: 'escape' } : { kind: 'descend' };
     interrupt = true;
@@ -473,6 +483,8 @@ function answerPrompt(state: GameState, rng: Rng, action: Action): StepResult {
       state.items.push({ ...prompt.item, x: state.player.x, y: state.player.y, declined: true });
       pushLog(state, 'info', `${itemLabel(prompt.item)} は置いていった。`);
     }
+    // 階段は断ったら聞き直さない。離れるまで待機で休めるようにする
+    if (prompt.kind === 'descend' || prompt.kind === 'escape') state.stairsDeclined = true;
     state.prompt = null;
     return { acted: false, interrupt: true };
   }
@@ -633,6 +645,7 @@ function descend(state: GameState, rng: Rng): void {
     ...(stairsAt ? [stairsAt] : []),
   ]);
   state.effects = {};
+  state.stairsDeclined = false;
   state.floorTurn = 0;
   state.stalkerCalled = false;
   state.stalkerWarned = false;
@@ -1124,15 +1137,17 @@ function rollHit(rng: Rng, accuracy: number, evasion: number, sureHit: boolean):
   return rng.chance(accuracy * (1 - evasion));
 }
 
-/** プレイヤーに隣接している敵。群れ薙ぎで使う */
-/** プレイヤーに隣接していて、角越しではない敵。群れ薙ぎで使う */
+/**
+ * プレイヤーに隣接している敵。群れ薙ぎで使う。
+ *
+ * **角越しも巻き込む。** 通常の攻撃は壁の角越しには届かないが、薙ぎ払いは例外にしてある。
+ * 通路の入口で戦うと、群れは角の向こうに詰まって並ぶ。
+ * そこに届かないと、数で押してくる相手のための武器が、
+ * 数で押してくる相手と戦う場面でだけ働かないことになる。
+ */
 function adjacentMonsters(state: GameState): Actor[] {
   const p = state.player;
-  return state.monsters.filter(
-    (m) =>
-      Math.max(Math.abs(m.x - p.x), Math.abs(m.y - p.y)) === 1 &&
-      canReach(state.map, p.x, p.y, m.x - p.x, m.y - p.y),
-  );
+  return state.monsters.filter((m) => Math.max(Math.abs(m.x - p.x), Math.abs(m.y - p.y)) === 1);
 }
 
 function killMonster(state: GameState, rng: Rng, m: Actor): void {
@@ -1144,18 +1159,80 @@ function killMonster(state: GameState, rng: Rng, m: Actor): void {
 }
 
 /**
+ * 1 マスに 1 つだけ、という規則。
+ *
+ * 落とし物が階段・罠・休憩床・他のアイテムと同じマスに乗ると、
+ * 描画も処理も先着順になって何が起きているか読めなくなる。
+ * 階段の上に落ちれば階段が隠れ、拾うかどうかを答えるまで降りられない。
+ * 罠の上なら罠が先に発動する。
+ *
+ * 判定はこの関数に閉じ込め、落とし物はすべて freeFloorNear を通す。
+ */
+function isFreeFloor(state: GameState, x: number, y: number): boolean {
+  // 階段・壁は Tile.Floor ではないのでここで弾かれる
+  if (tileAt(state.map, x, y) !== Tile.Floor) return false;
+  if (state.items.some((it) => it.x === x && it.y === y)) return false;
+  if (state.traps.some((t) => t.x === x && t.y === y)) return false;
+  if (state.floors.some((f) => f.x === x && f.y === y)) return false;
+  return true;
+}
+
+/**
+ * 何も置かれていない床のうち、そこから一番近いものを探す。
+ *
+ * 歩ける道をたどって広げるので、壁の向こうの届かない部屋には落ちない。
+ * 壁抜けの敵は壁の中で死ぬので、その場合は隣の床から探し始める。
+ * 壁の中に落ちた装備は拾いに行けないため、これが無いとドロップが消える。
+ */
+export function freeFloorNear(state: GameState, from: { x: number; y: number }): { x: number; y: number } | null {
+  const { map } = state;
+  const seen = new Uint8Array(map.width * map.height);
+  const queue: { x: number; y: number }[] = [];
+  const push = (x: number, y: number): void => {
+    if (!isWalkable(map, x, y)) return;
+    const i = idx(map, x, y);
+    if (seen[i]) return;
+    seen[i] = 1;
+    queue.push({ x, y });
+  };
+
+  if (isWalkable(map, from.x, from.y)) push(from.x, from.y);
+  else for (const [dx, dy] of AROUND) push(from.x + dx, from.y + dy);
+
+  for (let head = 0; head < queue.length; head++) {
+    const at = queue[head];
+    if (isFreeFloor(state, at.x, at.y)) return at;
+    for (const [dx, dy] of AROUND) {
+      if (canStep(map, at.x, at.y, dx, dy)) push(at.x + dx, at.y + dy);
+    }
+  }
+  return null;
+}
+
+/** 8 方向 */
+const AROUND: [number, number][] = [
+  [-1, -1], [0, -1], [1, -1],
+  [-1, 0], [1, 0],
+  [-1, 1], [0, 1], [1, 1],
+];
+
+/**
  * ボスを倒したとき。財宝を落とし、クリア階なら脱出階段を出す。
- * 財宝はその場に落とす。倒した場所まで取りに行く手間も判断のうちにする。
+ * 財宝は倒した場所の近くに落とす。取りに行く手間も判断のうちにする。
  */
 function defeatBoss(state: GameState, m: Actor): void {
-  const treasure = makeTreasure(state.depth, m.x, m.y);
+  // 脱出階段を先に出す。あとで財宝を置くときに、そのマスを避けられるようにする
+  if (isClearFloor(state.depth)) {
+    state.map.tiles[idx(state.map, m.x, m.y)] = Tile.StairsUp;
+    state.explored[idx(state.map, m.x, m.y)] = 1;
+    pushLog(state, 'alert', '地上へ続く階段が現れた。');
+  }
+
+  const at = freeFloorNear(state, m);
+  if (!at) return;
+  const treasure = makeTreasure(state.depth, at.x, at.y);
   state.items.push(treasure);
   pushLog(state, 'alert', `${itemLabel(treasure)} が転がり出た。`);
-
-  if (!isClearFloor(state.depth)) return;
-  state.map.tiles[idx(state.map, m.x, m.y)] = Tile.StairsUp;
-  state.explored[idx(state.map, m.x, m.y)] = 1;
-  pushLog(state, 'alert', '地上へ続く階段が現れた。');
 }
 
 /**
@@ -1169,10 +1246,11 @@ function dropEquip(state: GameState, rng: Rng, m: Actor): void {
   const family = MONSTERS[m.kind as MonsterKind].family;
   const rate = DROP_CHANCE * FAMILY_DROP_RATE[family] * (m.spawned ? SPAWN_REWARD : 1);
   if (!rng.chance(rate)) return;
-  if (state.items.some((it) => it.x === m.x && it.y === m.y)) return;
+  const at = freeFloorNear(state, m);
+  if (!at) return;
   const id = pickDropEquip(rng, family);
   if (!id) return;
-  const item = makeEquipItem(rng, id, state.depth, m.x, m.y);
+  const item = makeEquipItem(rng, id, state.depth, at.x, at.y);
   state.items.push(item);
   pushLog(state, 'info', `${itemLabel(item)} を落とした。`);
 }
@@ -1464,8 +1542,7 @@ function canHitPlayer(state: GameState, m: Actor): boolean {
  * 直交か 45 度に並んでいないとき、射程の外、壁で遮られているときは null を返す。
  * 途中に敵がいればその敵を返す。遠隔攻撃は味方を貫通しない。
  *
- * 斜めの射線には移動と同じ角の規則を掛けてある。
- * 射線だけ角を抜けられると、通路の曲がり角に下がっても撃たれ続ける。
+ * 斜めの射線は shotPasses が決める。移動より緩い。
  */
 function lineTarget(state: GameState, m: Actor, maxRange: number): Actor | null {
   const p = state.player;
@@ -1481,7 +1558,7 @@ function lineTarget(state: GameState, m: Actor, maxRange: number): Actor | null 
   let x = m.x;
   let y = m.y;
   for (let step = 0; step < dist; step++) {
-    if (!canReach(state.map, x, y, sx, sy)) return null;
+    if (!shotPasses(state.map, x, y, sx, sy)) return null;
     x += sx;
     y += sy;
     if (!isWalkable(state.map, x, y)) return null;
@@ -1490,6 +1567,22 @@ function lineTarget(state: GameState, m: Actor, maxRange: number): Actor | null 
     if (blocker) return blocker;
   }
   return null;
+}
+
+/**
+ * 弾が (x, y) から (dx, dy) の向きへ抜けられるか。
+ *
+ * 体の移動より緩い。移動は斜めのとき**両隣**が床であることを要求するが、
+ * 弾は**片方**が空いていれば抜ける。
+ * 移動と同じ厳しさにすると、見た目には通っている斜めの射線でも撃たなくなる。
+ * 通路の脇に立った敵から「射線が通っているのに撃ってこない」のがこれだった。
+ *
+ * 両隣とも壁のときだけ通さない。壁の角どうしが点で触れているだけの隙間なので、
+ * ここまで通ると射線が事実上どこへでも届いてしまう。
+ */
+function shotPasses(map: GameMap, x: number, y: number, dx: number, dy: number): boolean {
+  if (dx === 0 || dy === 0) return true;
+  return isWalkable(map, x + dx, y) || isWalkable(map, x, y + dy);
 }
 
 /** 槍の突き。射程 2 の直線に当たるものがあれば突く */
@@ -1804,12 +1897,13 @@ export function toViewModel(state: GameState): ViewModel {
     cells[i] = { kind: 'floorRest', vis: cells[i].vis };
   }
 
-  // 見つかった罠だけ重ねる。見つかっていないものは地形と区別が付かない
+  // 見つかった罠だけ重ねる。見つかっていないものは地形と区別が付かない。
+  // 落とし穴は別の文字にする。踏むと次の階へ降りるので、他の罠と意味が違う
   for (const t of state.traps) {
     if (!t.found) continue;
     const i = idx(map, t.x, t.y);
     if (state.explored[i] !== 1) continue;
-    cells[i] = { kind: 'trap', vis: cells[i].vis };
+    cells[i] = { kind: t.kind === 'pit' ? 'trapPit' : 'trap', vis: cells[i].vis };
   }
 
   // アイテムは一度見た場所のものを覚えておく (見えていなくても表示する)
