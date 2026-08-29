@@ -2,6 +2,7 @@ import {
   BOSS,
   MONSTERS,
   SLIME_CAP,
+  SPLIT_REWARD,
   STALKER,
   actorName,
   bountyFor,
@@ -56,6 +57,7 @@ import {
 } from './items';
 import {
   Tile,
+  canReach,
   canStep,
   deadEndRooms,
   generateMap,
@@ -326,7 +328,9 @@ export function step(state: GameState, action: Action): StepResult {
   if (action.type === 'move') {
     const nx = p.x + action.dx;
     const ny = p.y + action.dy;
-    const target = monsterAt(state, nx, ny);
+    // 壁の角越しには攻撃も移動もできない。敵にも同じ制限をかけてある
+    const reaches = canReach(state.map, p.x, p.y, action.dx, action.dy);
+    const target = reaches ? monsterAt(state, nx, ny) : undefined;
     if (target) {
       playerAttack(state, rng, target);
     } else if (canStep(state.map, p.x, p.y, action.dx, action.dy)) {
@@ -1030,9 +1034,14 @@ function rollHit(rng: Rng, accuracy: number, evasion: number, sureHit: boolean):
 }
 
 /** プレイヤーに隣接している敵。群れ薙ぎで使う */
+/** プレイヤーに隣接していて、角越しではない敵。群れ薙ぎで使う */
 function adjacentMonsters(state: GameState): Actor[] {
   const p = state.player;
-  return state.monsters.filter((m) => Math.max(Math.abs(m.x - p.x), Math.abs(m.y - p.y)) === 1);
+  return state.monsters.filter(
+    (m) =>
+      Math.max(Math.abs(m.x - p.x), Math.abs(m.y - p.y)) === 1 &&
+      canReach(state.map, p.x, p.y, m.x - p.x, m.y - p.y),
+  );
 }
 
 function killMonster(state: GameState, rng: Rng, m: Actor): void {
@@ -1064,6 +1073,8 @@ function defeatBoss(state: GameState, m: Actor): void {
  * 戦うか避けるかの判断に装備の期待値が乗る。
  */
 function dropEquip(state: GameState, rng: Rng, m: Actor): void {
+  // 分裂体は落とさない。割るたびに抽選が増えると、分裂を止める装備が分裂で稼げてしまう
+  if (m.split) return;
   const family = MONSTERS[m.kind as MonsterKind].family;
   if (!rng.chance(DROP_CHANCE * (m.spawned ? SPAWN_REWARD : 1))) return;
   if (state.items.some((it) => it.x === m.x && it.y === m.y)) return;
@@ -1076,12 +1087,14 @@ function dropEquip(state: GameState, rng: Rng, m: Actor): void {
 
 /**
  * 撃破数・スコア・経験値をまとめて加算する。雷で倒したときもここを通す。
+ *
  * 後から湧いた個体は報酬を半分にする。居座って稼ぐ動機を弱めるためで、0 にはしない。
+ * 分裂体はさらに下げる。分裂は総 HP を増やさないので、労力が同じまま撃破数だけ増えるためである。
  */
 function rewardKill(state: GameState, m: Actor): void {
   state.kills++;
   const def = MONSTERS[m.kind as MonsterKind];
-  const rate = m.spawned ? SPAWN_REWARD : 1;
+  const rate = (m.spawned ? SPAWN_REWARD : 1) * (m.split ? SPLIT_REWARD : 1);
   state.score += Math.ceil(bountyFor(def, state.depth) * rate);
   gainXp(state, Math.ceil(xpFor(def, state.depth) * rate));
 }
@@ -1153,8 +1166,10 @@ function thornsCounter(state: GameState, rng: Rng, m: Actor): void {
 
 /** 分裂: 隣の空きマスに HP 半分の個体を置く。上限あり */
 function trySplit(state: GameState, rng: Rng, m: Actor): void {
-  const slimes = state.monsters.filter((x) => x.kind === 'slime').length;
-  if (slimes >= SLIME_CAP) return;
+  // 同じ種類で数える。kind を固定すると、グレード 2 以降 (slimeSplit, slimeMimic) で
+  // 数が常に 0 になり、上限が一度も働かない
+  const kin = state.monsters.filter((x) => x.kind === m.kind).length;
+  if (kin >= SLIME_CAP) return;
   const half = Math.floor(m.hp / 2);
   if (half < 1) return;
   const spot = freeNeighbor(state, m.x, m.y, rng, false);
@@ -1170,6 +1185,7 @@ function trySplit(state: GameState, rng: Rng, m: Actor): void {
     atk: m.atk,
     def: m.def,
     evasion: m.evasion,
+    split: true,
   };
   state.monsters.push(child);
   pushLog(state, 'enemy', `${actorName(m.kind)}が分裂した。`);
@@ -1208,7 +1224,7 @@ function monsterTurn(state: GameState, rng: Rng, m: Actor, def: MonsterDef): boo
 
   // 擬態: 武器のふりをして動かない。隣に来られた時点で正体を現し、その場で殴る
   if (isDisguised(m)) {
-    if (dist > 1) return true;
+    if (!canHitPlayer(state, m)) return true;
     reveal(state, m);
     monsterAttack(state, rng, m);
     return true;
@@ -1218,7 +1234,7 @@ function monsterTurn(state: GameState, rng: Rng, m: Actor, def: MonsterDef): boo
     return true;
   }
 
-  if (dist === 1) {
+  if (canHitPlayer(state, m)) {
     monsterAttack(state, rng, m);
     return true;
   }
@@ -1244,14 +1260,14 @@ function tryAction(state: GameState, rng: Rng, m: Actor, kind: ActionKind, dist:
   const name = actorName(m.kind);
   switch (kind) {
     case 'doubleAttack':
-      if (dist !== 1) return false;
+      if (!canHitPlayer(state, m)) return false;
       pushLog(state, 'enemy', `${name}が続けて切りつけた。`);
       monsterAttack(state, rng, m);
       if (p.hp > 0) monsterAttack(state, rng, m);
       return true;
 
     case 'smash':
-      if (dist !== 1) return false;
+      if (!canHitPlayer(state, m)) return false;
       monsterAttack(state, rng, m, { pierce: true, label: `${name}の強打!` });
       return true;
 
@@ -1267,7 +1283,7 @@ function tryAction(state: GameState, rng: Rng, m: Actor, kind: ActionKind, dist:
     }
 
     case 'poison': {
-      if (dist !== 1) return false;
+      if (!canHitPlayer(state, m)) return false;
       monsterAttack(state, rng, m, { label: `${name}の毒牙!` });
       if (p.hp <= 0) return true;
       state.effects.poison = Math.min(POISON_MAX_TURNS, (state.effects.poison ?? 0) + POISON_TURNS);
@@ -1276,7 +1292,7 @@ function tryAction(state: GameState, rng: Rng, m: Actor, kind: ActionKind, dist:
     }
 
     case 'corrodeHit': {
-      if (dist !== 1) return false;
+      if (!canHitPlayer(state, m)) return false;
       monsterAttack(state, rng, m, { label: `${name}が噛みついた!` });
       if (p.hp <= 0) return true;
       corrode(state);
@@ -1294,6 +1310,22 @@ function tryAction(state: GameState, rng: Rng, m: Actor, kind: ActionKind, dist:
       return true;
     }
   }
+}
+
+/**
+ * 敵からプレイヤーへ攻撃が届くか。
+ *
+ * 隣接していても、壁の角越しには届かない。
+ * 例外は 2 つある。壁抜けは壁の中を通れる相手なので角の制限が意味を持たず、
+ * reach は角越しを能力として持たせた敵である。
+ */
+function canHitPlayer(state: GameState, m: Actor): boolean {
+  const p = state.player;
+  const dx = p.x - m.x;
+  const dy = p.y - m.y;
+  if (Math.max(Math.abs(dx), Math.abs(dy)) !== 1) return false;
+  if (hasPassive(m.kind, 'reach') || hasPassive(m.kind, 'phasing')) return true;
+  return canReach(state.map, m.x, m.y, dx, dy);
 }
 
 function moveToward(state: GameState, m: Actor, sx: number, sy: number): void {

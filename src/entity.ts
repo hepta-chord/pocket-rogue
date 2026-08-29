@@ -41,6 +41,8 @@ export interface Actor {
   revealed?: boolean;
   /** フロア生成後に湧いた個体。経験値とドロップを下げる */
   spawned?: boolean;
+  /** 分裂で生まれた個体。ドロップせず、経験値とスコアが下がる */
+  split?: boolean;
 }
 
 /**
@@ -52,8 +54,9 @@ export interface Actor {
  * - phasing: 壁の中を移動できる
  * - split: 近接攻撃を受けて生き残ると HP を半分にして 2 匹に割れる
  * - mimic: 落ちている武器に化けている。隣に来るか殴られるまで動かず、武器として見える
+ * - reach: 壁の角越しに攻撃が届く。通常の敵は角を回り込めない
  */
-export type Passive = 'fast' | 'slow' | 'regen' | 'erratic' | 'phasing' | 'split' | 'mimic';
+export type Passive = 'fast' | 'slow' | 'regen' | 'erratic' | 'phasing' | 'split' | 'mimic' | 'reach';
 
 /**
  * アクション: 条件が揃ったとき確率で使う技。使わなかったら通常行動。
@@ -216,6 +219,18 @@ export const STALKER: MonsterKind = 'stalker';
 export const BOSS: MonsterKind = 'dragon';
 
 export const SLIME_CAP = 4;
+
+/**
+ * 分裂で生まれた個体の報酬倍率。
+ *
+ * 分裂は親が HP を半分渡す形なので、倒すのに必要な総ダメージは変わらない。
+ * 労力が同じまま撃破数だけが増えるため、倍率が高いと稼ぎ場になる。
+ *
+ * 上限 4 のとき子は 3 体なので、合計は 1 + 3 × この値になる。
+ * 0.2 なら 1.6 倍で、抽選 1 回あたりの基礎経験値が
+ * 戦士・俊敏のすぐ下に収まる (グレード 1 で 4.8 対 4.0 と 3.0)。
+ */
+export const SPLIT_REWARD = 0.2;
 
 export function monsterDef(kind: ActorKind): MonsterDef | null {
   return kind === 'player' ? null : MONSTERS[kind];

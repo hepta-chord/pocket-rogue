@@ -72,6 +72,21 @@ export function isWalkable(map: GameMap, x: number, y: number): boolean {
 }
 
 /**
+ * (x, y) から (dx, dy) の隣へ攻撃が届くか。
+ *
+ * 斜めのときは、隣が片方でも壁なら届かない。壁の角越しには殴れないということである。
+ * これを入れないと通路の入口が防衛線にならず、1 対 1 を作るために通路の奥へ
+ * 2 歩下がる必要が出る。
+ *
+ * 行き先が歩けるかどうかは見ない。壁の中にいる敵 (壁抜け) には届いてよい。
+ * 届かないことにすると、壁に潜ったまま一方的に殴られる。
+ */
+export function canReach(map: GameMap, x: number, y: number, dx: number, dy: number): boolean {
+  if (dx === 0 || dy === 0) return true;
+  return isWalkable(map, x + dx, y) && isWalkable(map, x, y + dy);
+}
+
+/**
  * (x, y) から (dx, dy) へ 1 マス動けるか。
  *
  * 斜めのときは、行き先が床でも**隣が片方でも壁なら通さない**。
@@ -83,8 +98,7 @@ export function isWalkable(map: GameMap, x: number, y: number): boolean {
  */
 export function canStep(map: GameMap, x: number, y: number, dx: number, dy: number): boolean {
   if (!isWalkable(map, x + dx, y + dy)) return false;
-  if (dx === 0 || dy === 0) return true;
-  return isWalkable(map, x + dx, y) && isWalkable(map, x, y + dy);
+  return canReach(map, x, y, dx, dy);
 }
 
 /**
