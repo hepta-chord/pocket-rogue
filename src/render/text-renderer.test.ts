@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { visibleLogLines } from './text-renderer';
+import { HUD_ROWS, LOG_ROWS, gridFor, visibleLogLines } from './text-renderer';
 import type { LogEntry } from '../view';
 
 const line = (text: string, turn: number): LogEntry => ({ text, kind: 'info', turn });
@@ -30,5 +30,35 @@ describe('visibleLogLines', () => {
     const log = Array.from({ length: 8 }, (_, i) => line(`turn${i}`, i));
     const lines = visibleLogLines(log, 7, 6, 20);
     expect(lines).toHaveLength(6);
+  });
+});
+
+describe('gridFor', () => {
+  /**
+   * マップとログが重ならないこと。
+   *
+   * canvas を測ったときの高さと、描くときの高さが違うとここが破れる。
+   * 実際、起動時にスロットが組み上がって canvas が縮んだあと測り直していなかったため、
+   * マップの下端がログに 65px 食い込み、画面全体も縦に潰れていた。
+   */
+  it('どの画面サイズでもマップの下端がログの上端を超えない', () => {
+    for (let w = 280; w <= 1200; w += 17) {
+      for (let h = 320; h <= 1400; h += 23) {
+        const g = gridFor(w, h);
+        const mapBottom = (HUD_ROWS + g.rows) * g.cell;
+        const logTop = h - LOG_ROWS * g.cell;
+        expect(mapBottom).toBeLessThanOrEqual(logTop);
+      }
+    }
+  });
+
+  it('セルは下限と上限の内側に収まる', () => {
+    for (const [w, h] of [[280, 320], [390, 457], [1200, 1400], [100, 100]] as const) {
+      const g = gridFor(w, h);
+      expect(g.cell).toBeGreaterThanOrEqual(12);
+      expect(g.cell).toBeLessThanOrEqual(32);
+      expect(g.rows).toBeGreaterThanOrEqual(1);
+      expect(g.cols).toBeGreaterThanOrEqual(1);
+    }
   });
 });
