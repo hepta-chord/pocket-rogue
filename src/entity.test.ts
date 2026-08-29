@@ -61,8 +61,8 @@ describe('MONSTERS', () => {
     for (let depth = 1; depth <= 30; depth++) {
       const here = familiesAt(depth);
       expect(here.size).toBeGreaterThanOrEqual(2);
-      // 5 系統が揃うのは、グレード 3 が出そろう深さから
-      if (depth < 25) expect(here.size).toBeLessThanOrEqual(4);
+      // 6 系統が揃うのは、グレード 3 が出そろう深さから
+      if (depth < 25) expect(here.size).toBeLessThanOrEqual(5);
     }
   });
 
@@ -141,6 +141,7 @@ describe('MONSTERS', () => {
       warrior: 'ゴブリン',
       odd: 'スライム',
       heavy: 'トロル',
+      ranged: 'コボルト',
     };
     for (const k of KINDS) {
       const d = MONSTERS[k];

@@ -21,6 +21,9 @@ export type MonsterKind =
   | 'troll'
   | 'trollRock'
   | 'trollIron'
+  | 'koboldSpear'
+  | 'koboldBow'
+  | 'koboldSniper'
   | 'dragon'
   | 'stalker';
 export type ActorKind = 'player' | MonsterKind;
@@ -56,6 +59,8 @@ export interface Actor {
  * - mimic: 落ちている武器に化けている。隣に来るか殴られるまで動かず、武器として見える
  * - reach: 壁の角越しに攻撃が届く。通常の敵は角を回り込めない
  * - wardThunder: 雷が効かない。範囲攻撃で押し切られる相手にだけ持たせる
+ * - spear: 直線上なら 2 マス先にも突きが届く。間にいるものを巻き込む
+ * - scavenge: 味方を倒すと次のグレードに成り上がる
  */
 export type Passive =
   | 'fast'
@@ -66,7 +71,9 @@ export type Passive =
   | 'split'
   | 'mimic'
   | 'reach'
-  | 'wardThunder';
+  | 'wardThunder'
+  | 'spear'
+  | 'scavenge';
 
 /**
  * アクション: 条件が揃ったとき確率で使う技。使わなかったら通常行動。
@@ -76,8 +83,16 @@ export type Passive =
  * - breath: 距離 2〜4 で見えているとき、炎を吐く (攻撃力の半分 + 階数。防具で軽減)
  * - poison: 隣接時、毒を与える (しばらく毎ターン HP が減る)
  * - corrodeHit: 隣接時、装備を腐食させる
+ * - shoot: 見えていて直線上に並んでいるとき、距離 2〜6 から射る。間にいるものを巻き込む
  */
-export type ActionKind = 'doubleAttack' | 'smash' | 'leap' | 'breath' | 'poison' | 'corrodeHit';
+export type ActionKind =
+  | 'doubleAttack'
+  | 'smash'
+  | 'leap'
+  | 'breath'
+  | 'poison'
+  | 'corrodeHit'
+  | 'shoot';
 
 export interface MonsterAction {
   kind: ActionKind;
@@ -92,11 +107,12 @@ export interface MonsterAction {
  * - warrior 戦士: 素直に強い、装備を落とす
  * - odd 変則: 通常の戦い方が通じない
  * - heavy 重装: 高 HP、鈍足、再生
+ * - ranged 遠隔: 間合いの外から削る。柔らかいが、通路で 1:1 を作っても届く
  * - boss ボス: 階を代表する 1 体
  *
  * 装備の系統特効がこの軸を参照する。
  */
-export type MonsterFamily = 'swarm' | 'swift' | 'warrior' | 'odd' | 'heavy' | 'boss';
+export type MonsterFamily = 'swarm' | 'swift' | 'warrior' | 'odd' | 'heavy' | 'ranged' | 'boss';
 
 export const FAMILY_NAMES: Record<MonsterFamily, string> = {
   swarm: '群れ',
@@ -104,6 +120,7 @@ export const FAMILY_NAMES: Record<MonsterFamily, string> = {
   warrior: '戦士',
   odd: '変則',
   heavy: '重装',
+  ranged: '遠隔',
   boss: 'ボス',
 };
 
@@ -173,18 +190,19 @@ const ANY = 99;
 /**
  * 敵の定義表。
  *
- * 5 系統 × 3 グレード + ボス 2 種である。
+ * 6 系統 × 3 グレード + ボス 2 種である。
  * 系統ごとに文字と基になる生き物を固定し、名前の修飾でグレードを示す。
  *
  * **系統ごとに出る帯をずらし、あいだに空白期間を置いてある。**
- * 1 つの階に出るのは 2〜5 系統だけで、全部が揃うのは最深部だけである。
+ * 1 つの階に出るのは 2〜5 系統だけで、6 系統すべてが揃うのは最深部だけである。
  * 全系統が全階に出ると、10 階のあいだ顔ぶれが変わらず、階の特色が出ない。
  *
- * 30F でクリアになるので、12 種すべてが B25 までに出そろうように詰めてある。
+ * 30F でクリアになるので、15 種すべてが B25 までに出そろうように詰めてある。
  *
  *   系統    グレード 1   グレード 2   グレード 3
  *   群れ    B1〜B5       B9〜B14      B18〜
  *   俊敏    B2〜B8       B11〜B16     B20〜
+ *   遠隔    B3〜B7       B12〜B17     B22〜
  *   戦士    B6〜B10      B14〜B19     B23〜
  *   重装    B8〜B13      B16〜B21     B25〜
  *
@@ -218,15 +236,30 @@ export const MONSTERS: Record<MonsterKind, MonsterDef> = {
   goblinArmored: { name: '重装ゴブリン', family: 'warrior', grade: 2, hp: 7, atk: 6, def: 4, evasion: 0, xp: 16, minDepth: 14, maxDepth: 19, weight: 4, maxPerFloor: ANY, pack: [1, 1], passives: [], action: { kind: 'doubleAttack', chance: 0.4 } },
   goblinKing: { name: 'ゴブリン王', family: 'warrior', grade: 3, hp: 17, atk: 8, def: 6, evasion: 0, xp: 46, minDepth: 23, maxDepth: ANY, weight: 4, maxPerFloor: ANY, pack: [1, 1], passives: [], action: { kind: 'doubleAttack', chance: 0.5 } },
 
-  // 重装: 高 HP、鈍足、再生。強打の発生率が上がる
-  troll: { name: 'トロル', family: 'heavy', grade: 1, hp: 13, atk: 8, def: 3, evasion: 0, xp: 13, minDepth: 8, maxDepth: 13, weight: 2, maxPerFloor: 3, pack: [1, 1], passives: ['regen', 'slow'], action: { kind: 'smash', chance: 0.25 } },
-  trollRock: { name: '岩トロル', family: 'heavy', grade: 2, hp: 18, atk: 7, def: 5, evasion: 0, xp: 44, minDepth: 16, maxDepth: 21, weight: 2, maxPerFloor: 3, pack: [1, 1], passives: ['regen', 'slow'], action: { kind: 'smash', chance: 0.35 } },
+  // 重装: 高 HP、鈍足。強打の発生率が上がる。
+  //
+  // 再生はグレード 3 だけに残してある。鈍足の相手は「殴って下がる」で削るのが定石だが、
+  // 再生があると下がっている間に戻されるので、その定石が成立しない。
+  // 結果として範囲攻撃 (雷) でまとめて押し切るしか手がなくなり、戦い方が 1 つに潰れていた。
+  // 鉄トロルだけは、そこまで来たプレイヤーに雷か真っ向勝負かを選ばせる相手として残す。
+  troll: { name: 'トロル', family: 'heavy', grade: 1, hp: 13, atk: 8, def: 3, evasion: 0, xp: 13, minDepth: 8, maxDepth: 13, weight: 2, maxPerFloor: 3, pack: [1, 1], passives: ['slow'], action: { kind: 'smash', chance: 0.25 } },
+  trollRock: { name: '岩トロル', family: 'heavy', grade: 2, hp: 18, atk: 7, def: 5, evasion: 0, xp: 44, minDepth: 16, maxDepth: 21, weight: 2, maxPerFloor: 3, pack: [1, 1], passives: ['slow'], action: { kind: 'smash', chance: 0.35 } },
   trollIron: { name: '鉄トロル', family: 'heavy', grade: 3, hp: 32, atk: 9, def: 7, evasion: 0, xp: 100, minDepth: 25, maxDepth: ANY, weight: 2, maxPerFloor: 3, pack: [1, 1], passives: ['regen', 'slow'], action: { kind: 'smash', chance: 0.45 } },
 
   // 変則: 通常の戦い方が通じない。分裂 → 壁抜け → 擬態と重なっていく
   slime: { name: 'スライム', family: 'odd', grade: 1, hp: 3, atk: 4, def: 0, evasion: 0, xp: 5, minDepth: 1, maxDepth: 10, weight: 3, maxPerFloor: 3, pack: [1, 1], passives: ['split'] },
   slimeSplit: { name: '幽体スライム', family: 'odd', grade: 2, hp: 6, atk: 3, def: 1, evasion: 0.05, xp: 11, minDepth: 11, maxDepth: 20, weight: 3, maxPerFloor: 3, pack: [1, 1], passives: ['split', 'phasing'] },
   slimeMimic: { name: '擬態スライム', family: 'odd', grade: 3, hp: 10, atk: 4, def: 2, evasion: 0.05, xp: 30, minDepth: 21, maxDepth: ANY, weight: 3, maxPerFloor: 3, pack: [1, 1], passives: ['split', 'phasing', 'mimic'] },
+
+  // 遠隔: 間合いの外から削る。柔らかいが、通路に下がって 1:1 を作っても届く。
+  //
+  // 「通路で 1 体ずつ処理する」が万能の解になっていたので、その外から殴る役を置いた。
+  // 攻撃は直線上に飛び、**間にいるものに先に当たる**。
+  // つまり通路に敵が詰まっているほど味方に当たり、当てて倒すとグレードが上がる。
+  // 詰めさせるか散らすかがそのまま判断になる。
+  koboldSpear: { name: '槍コボルト', family: 'ranged', grade: 1, hp: 3, atk: 4, def: 1, evasion: 0, xp: 5, minDepth: 3, maxDepth: 7, weight: 3, maxPerFloor: 3, pack: [1, 2], passives: ['spear', 'scavenge'] },
+  koboldBow: { name: '弓コボルト', family: 'ranged', grade: 2, hp: 5, atk: 5, def: 2, evasion: 0.05, xp: 12, minDepth: 12, maxDepth: 17, weight: 3, maxPerFloor: 3, pack: [1, 2], passives: ['scavenge'], action: { kind: 'shoot', chance: 0.6 } },
+  koboldSniper: { name: '狙撃コボルト', family: 'ranged', grade: 3, hp: 8, atk: 6, def: 3, evasion: 0.08, xp: 34, minDepth: 22, maxDepth: ANY, weight: 3, maxPerFloor: 3, pack: [1, 2], passives: ['spear'], action: { kind: 'shoot', chance: 0.7 } },
 
   // ボス: 階を代表する 1 体
   dragon: { name: 'ドラゴン', family: 'boss', grade: 0, hp: 20, atk: 8, def: 4, evasion: 0, xp: 40, bounty: 120, minDepth: 10, maxDepth: ANY, weight: 0, maxPerFloor: 1, pack: [1, 1], passives: ['wardThunder'], action: { kind: 'breath', chance: 0.3 } },
@@ -236,6 +269,27 @@ export const MONSTERS: Record<MonsterKind, MonsterDef> = {
   // 経験値を 0 にしてあるので、倒せてしまっても成長が壊れない。
   stalker: { name: '追う者', family: 'boss', grade: 0, hp: 150, atk: 9, def: 10, evasion: 0, xp: 0, bounty: 300, minDepth: 1, maxDepth: ANY, weight: 0, maxPerFloor: 1, pack: [1, 1], passives: ['wardThunder'], action: { kind: 'smash', chance: 0.3 } },
 };
+
+/**
+ * 味方を倒した個体が成り上がる先。
+ *
+ * 遠隔の攻撃は直線上の最初のものに当たるので、味方が前に詰まっていると同士討ちになる。
+ * それを「事故」で終わらせず、倒した側の格が上がる仕掛けにしてある。
+ * プレイヤーから見ると、通路に敵を詰めさせる戦い方に代償が付く。
+ *
+ * 経験値は倒した側に入らないので、これで稼ぐことはできない。
+ * 数が減るかわりに 1 体が強くなるだけで、差し引きは損になる。
+ */
+export const UPGRADE: Partial<Record<MonsterKind, MonsterKind>> = {
+  koboldSpear: 'koboldBow',
+  koboldBow: 'koboldSniper',
+};
+
+/** 遠隔攻撃が届く最大の距離 */
+export const SHOOT_RANGE = 6;
+
+/** 槍の突きが届く距離 */
+export const SPEAR_RANGE = 2;
 
 /** 長居への対策として呼ばれる敵 */
 export const STALKER: MonsterKind = 'stalker';
@@ -296,6 +350,7 @@ const GROWTH: Record<MonsterFamily, { hp: number; atk: number }> = {
   warrior: { hp: 0.75, atk: 1 / 3 },
   heavy: { hp: 0.75, atk: 1 / 3 },
   odd: { hp: 0.6, atk: 0.28 },
+  ranged: { hp: 0.75, atk: 1 / 3 },
   boss: { hp: 0.75, atk: 1 / 3 },
 };
 

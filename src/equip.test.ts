@@ -173,7 +173,7 @@ describe('出現の選び方', () => {
 
   it('ドロップはドロップ限定の品からしか出ない', () => {
     const rng = new Rng(hashSeed('DROP'));
-    const families: MonsterFamily[] = ['swarm', 'swift', 'warrior', 'odd', 'heavy'];
+    const families: MonsterFamily[] = ['swarm', 'swift', 'warrior', 'odd', 'heavy', 'ranged'];
     for (const f of families) {
       for (let i = 0; i < 200; i++) {
         const id = pickDropEquip(rng, f);

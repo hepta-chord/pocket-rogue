@@ -67,7 +67,9 @@ export function stackLimit(kind: ConsumableKind): number {
 
 // 攻撃力がレベルで伸びなくなったぶん、武器の引きが勝敗に直結する。
 // 武器の重みを上げて、1 個あたりの重みを下げる。
-// 回復薬は 1 個あたりの量を下げたぶん、出る数を増やしてある。
+// 回復薬は 1 個で最大 HP の半分が戻る。
+// 出る数を 4 に絞る案も測ったが、B20 到達率が 12% から 8% に落ちた。
+// 深層は元から目標に届いていないので、量と数の両方を絞る形は採らない。
 // 財宝は床には出ない。ボスを倒したときだけ落ちる
 const WEIGHTS: Record<ItemKind, number> = { potion: 6, elixir: 4, map: 3, weapon: 4, armor: 3, treasure: 0 };
 const KINDS = (Object.keys(WEIGHTS) as ItemKind[]).filter((k) => WEIGHTS[k] > 0);
@@ -138,6 +140,8 @@ export const FAMILY_DROP_RATE: Record<MonsterFamily, number> = {
   warrior: 1,
   odd: 1.2,
   heavy: 1.8,
+  // 遠隔は柔らかいぶん、近づけさえすれば安全に倒せる。近づく手間に見合う程度に留める
+  ranged: 1.1,
   boss: 1,
 };
 

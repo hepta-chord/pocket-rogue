@@ -12,7 +12,10 @@ import {
   MONSTERS,
   SLIME_CAP,
   SPLIT_REWARD,
+  SHOOT_RANGE,
+  SPEAR_RANGE,
   STALKER,
+  UPGRADE,
   actorName,
   bountyFor,
   createMonster,
@@ -916,14 +919,16 @@ function pickUp(state: GameState): boolean {
 /**
  * 消耗品を使う。
  *
- * 回復薬 1 個の量を最大 HP の 1/4 に下げてある。
- * 出るか出ないかの差がそのまま生存時間の差になっていたので、量を下げて出る数を増やした。
+ * 回復薬 1 個の量は最大 HP の 1/2 である。
+ * 1/4 だと、削られた 2〜3 ターンぶんを埋めるだけで戦況が動かず、
+ * 「飲んで立て直して殴り返す」が成立しなかった。
+ * 半分戻るなら、劣勢からもう一度組み立て直す選択肢になる。
  */
 function useItem(state: GameState, kind: ConsumableKind): void {
   const p = state.player;
   switch (kind) {
     case 'potion': {
-      const heal = Math.min(p.maxHp - p.hp, Math.max(3, Math.ceil(p.maxHp / 4)));
+      const heal = Math.min(p.maxHp - p.hp, Math.max(5, Math.ceil(p.maxHp / 2)));
       p.hp += heal;
       pushLog(state, 'player', `HP 回復薬を飲んだ。HP が ${heal} 回復した。`);
       return;
@@ -1341,6 +1346,13 @@ function monsterTurn(state: GameState, rng: Rng, m: Actor, def: MonsterDef, fiel
     return true;
   }
 
+  // 槍: 隣接していなくても、直線上の 2 マス先には届く
+  if (def.passives.includes('spear') && trySpear(state, rng, m)) return true;
+
+  // 射手は撃てる位置に着いたら動かない。
+  // 詰めてしまうと隣接した近接の敵と変わらなくなり、遠隔である意味が消える
+  if (sees && def.action?.kind === 'shoot' && lineTarget(state, m, SHOOT_RANGE)) return false;
+
   if (sees) {
     // プレイヤーから見えている = 向こうからも見えているとみなして追ってくる。
     // 壁抜けは距離場の外を通れるので、素朴な寄せ方のままにする
@@ -1408,6 +1420,15 @@ function tryAction(state: GameState, rng: Rng, m: Actor, kind: ActionKind, dist:
       return true;
     }
 
+    case 'shoot': {
+      // 射程と直線の判定は lineTarget が持つ。ここは見えているかだけを見る
+      if (!sees) return false;
+      const target = lineTarget(state, m, SHOOT_RANGE);
+      if (!target) return false;
+      rangedAttack(state, rng, m, target, `${name}が射た!`);
+      return true;
+    }
+
     case 'breath': {
       if (!sees || dist < 2 || dist > 4) return false;
       const roll = Math.floor(m.atk / 2) + state.depth;
@@ -1435,6 +1456,90 @@ function canHitPlayer(state: GameState, m: Actor): boolean {
   if (Math.max(Math.abs(dx), Math.abs(dy)) !== 1) return false;
   if (hasPassive(m.kind, 'reach') || hasPassive(m.kind, 'phasing')) return true;
   return canReach(state.map, m.x, m.y, dx, dy);
+}
+
+/**
+ * m からプレイヤーへ向かう直線をたどり、最初に当たるものを返す。
+ *
+ * 直交か 45 度に並んでいないとき、射程の外、壁で遮られているときは null を返す。
+ * 途中に敵がいればその敵を返す。遠隔攻撃は味方を貫通しない。
+ *
+ * 斜めの射線には移動と同じ角の規則を掛けてある。
+ * 射線だけ角を抜けられると、通路の曲がり角に下がっても撃たれ続ける。
+ */
+function lineTarget(state: GameState, m: Actor, maxRange: number): Actor | null {
+  const p = state.player;
+  const dx = p.x - m.x;
+  const dy = p.y - m.y;
+  if (dx !== 0 && dy !== 0 && Math.abs(dx) !== Math.abs(dy)) return null;
+  const dist = Math.max(Math.abs(dx), Math.abs(dy));
+  // 距離 1 は通常の近接で処理する。遠隔は 2 マス先から
+  if (dist < 2 || dist > maxRange) return null;
+
+  const sx = Math.sign(dx);
+  const sy = Math.sign(dy);
+  let x = m.x;
+  let y = m.y;
+  for (let step = 0; step < dist; step++) {
+    if (!canReach(state.map, x, y, sx, sy)) return null;
+    x += sx;
+    y += sy;
+    if (!isWalkable(state.map, x, y)) return null;
+    if (x === p.x && y === p.y) return p;
+    const blocker = state.monsters.find((o) => o.x === x && o.y === y);
+    if (blocker) return blocker;
+  }
+  return null;
+}
+
+/** 槍の突き。射程 2 の直線に当たるものがあれば突く */
+function trySpear(state: GameState, rng: Rng, m: Actor): boolean {
+  const target = lineTarget(state, m, SPEAR_RANGE);
+  if (!target) return false;
+  rangedAttack(state, rng, m, target, `${actorName(m.kind)}が槍を突き出した!`);
+  return true;
+}
+
+/** 直線に飛ぶ攻撃を 1 回。当たったのがプレイヤーか敵かで分ける */
+function rangedAttack(state: GameState, rng: Rng, m: Actor, target: Actor, label: string): void {
+  if (target.kind === 'player') {
+    monsterAttack(state, rng, m, { label });
+    return;
+  }
+  crossFire(state, rng, m, target, label);
+}
+
+/**
+ * 同士討ち。
+ *
+ * 経験値もスコアも入らない。プレイヤーが倒したわけではないので、
+ * 敵を詰まらせて撃たせる形が稼ぎにならないようにしてある。
+ * 数が 1 体減るかわりに撃った側のグレードが上がるので、差し引きでは損になる。
+ */
+function crossFire(state: GameState, rng: Rng, m: Actor, target: Actor, label: string): void {
+  const hit = strike(rng, m.atk, target.def, MONSTER_ROLL_FLOOR);
+  target.hp -= hit.dealt;
+  pushLog(state, 'enemy', `${label} ${actorName(target.kind)}に当たった。${hit.dealt} のダメージ。`);
+  if (target.hp > 0) return;
+
+  state.monsters = state.monsters.filter((x) => x.id !== target.id);
+  pushLog(state, 'enemy', `${actorName(target.kind)}が倒れた。`);
+  upgradeMonster(state, m);
+}
+
+/** 味方を倒した個体を次のグレードへ上げる。HP は上がった先の最大値まで戻る */
+function upgradeMonster(state: GameState, m: Actor): void {
+  if (!hasPassive(m.kind, 'scavenge')) return;
+  const next = UPGRADE[m.kind as MonsterKind];
+  if (!next) return;
+  const grown = createMonster(next, state.depth, m.x, m.y, m.id);
+  m.kind = next;
+  m.hp = grown.hp;
+  m.maxHp = grown.maxHp;
+  m.atk = grown.atk;
+  m.def = grown.def;
+  m.evasion = grown.evasion;
+  pushLog(state, 'alert', `屍を踏み越え、${actorName(next)}になった。`);
 }
 
 function moveToward(state: GameState, m: Actor, sx: number, sy: number): void {
