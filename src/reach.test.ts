@@ -101,7 +101,10 @@ describe('角越しの攻撃', () => {
     expect(hit).toBe(true);
   });
 
-  it('群れ薙ぎは角越しの敵を巻き込まない', () => {
+  it('群れ薙ぎは角越しの敵も巻き込む', () => {
+    // 通常の攻撃は角越しに届かないが、薙ぎ払いだけは例外にしてある。
+    // 通路の入口で戦うと群れは角の向こうに詰まるので、そこに届かないと
+    // 数で押す相手のための武器が、数で押す相手と戦う場面でだけ働かない
     const s = corner('REACH5', 'ratPoison');
     // (2,1) にもう 1 体置き、群れ薙ぎで殴る
     s.monsters.push(createMonster('ratPoison', 11, 2, 1, 101));
@@ -110,7 +113,17 @@ describe('角越しの攻撃', () => {
     const cornerHp = target(s).hp;
     step(s, { type: 'move', dx: 1, dy: 0 });
 
-    // 隣の 1 体は巻き込まれるが、角越しの 1 体は無傷のまま
+    // 隣の 1 体も、角越しの 1 体も削れている
+    expect(target(s).hp).toBeLessThan(cornerHp);
+  });
+
+  it('薙ぎ払い以外は角越しの敵を巻き込まない', () => {
+    const s = corner('REACH6', 'ratPoison');
+    s.monsters.push(createMonster('ratPoison', 11, 2, 1, 101));
+    s.weapon = { id: 'swiftSpear', power: 9 };
+
+    const cornerHp = target(s).hp;
+    step(s, { type: 'move', dx: 1, dy: 0 });
     expect(target(s).hp).toBe(cornerHp);
   });
 });

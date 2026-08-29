@@ -1137,15 +1137,17 @@ function rollHit(rng: Rng, accuracy: number, evasion: number, sureHit: boolean):
   return rng.chance(accuracy * (1 - evasion));
 }
 
-/** プレイヤーに隣接している敵。群れ薙ぎで使う */
-/** プレイヤーに隣接していて、角越しではない敵。群れ薙ぎで使う */
+/**
+ * プレイヤーに隣接している敵。群れ薙ぎで使う。
+ *
+ * **角越しも巻き込む。** 通常の攻撃は壁の角越しには届かないが、薙ぎ払いは例外にしてある。
+ * 通路の入口で戦うと、群れは角の向こうに詰まって並ぶ。
+ * そこに届かないと、数で押してくる相手のための武器が、
+ * 数で押してくる相手と戦う場面でだけ働かないことになる。
+ */
 function adjacentMonsters(state: GameState): Actor[] {
   const p = state.player;
-  return state.monsters.filter(
-    (m) =>
-      Math.max(Math.abs(m.x - p.x), Math.abs(m.y - p.y)) === 1 &&
-      canReach(state.map, p.x, p.y, m.x - p.x, m.y - p.y),
-  );
+  return state.monsters.filter((m) => Math.max(Math.abs(m.x - p.x), Math.abs(m.y - p.y)) === 1);
 }
 
 function killMonster(state: GameState, rng: Rng, m: Actor): void {
@@ -1540,8 +1542,7 @@ function canHitPlayer(state: GameState, m: Actor): boolean {
  * 直交か 45 度に並んでいないとき、射程の外、壁で遮られているときは null を返す。
  * 途中に敵がいればその敵を返す。遠隔攻撃は味方を貫通しない。
  *
- * 斜めの射線には移動と同じ角の規則を掛けてある。
- * 射線だけ角を抜けられると、通路の曲がり角に下がっても撃たれ続ける。
+ * 斜めの射線は shotPasses が決める。移動より緩い。
  */
 function lineTarget(state: GameState, m: Actor, maxRange: number): Actor | null {
   const p = state.player;
@@ -1557,7 +1558,7 @@ function lineTarget(state: GameState, m: Actor, maxRange: number): Actor | null 
   let x = m.x;
   let y = m.y;
   for (let step = 0; step < dist; step++) {
-    if (!canReach(state.map, x, y, sx, sy)) return null;
+    if (!shotPasses(state.map, x, y, sx, sy)) return null;
     x += sx;
     y += sy;
     if (!isWalkable(state.map, x, y)) return null;
@@ -1566,6 +1567,22 @@ function lineTarget(state: GameState, m: Actor, maxRange: number): Actor | null 
     if (blocker) return blocker;
   }
   return null;
+}
+
+/**
+ * 弾が (x, y) から (dx, dy) の向きへ抜けられるか。
+ *
+ * 体の移動より緩い。移動は斜めのとき**両隣**が床であることを要求するが、
+ * 弾は**片方**が空いていれば抜ける。
+ * 移動と同じ厳しさにすると、見た目には通っている斜めの射線でも撃たなくなる。
+ * 通路の脇に立った敵から「射線が通っているのに撃ってこない」のがこれだった。
+ *
+ * 両隣とも壁のときだけ通さない。壁の角どうしが点で触れているだけの隙間なので、
+ * ここまで通ると射線が事実上どこへでも届いてしまう。
+ */
+function shotPasses(map: GameMap, x: number, y: number, dx: number, dy: number): boolean {
+  if (dx === 0 || dy === 0) return true;
+  return isWalkable(map, x + dx, y) || isWalkable(map, x, y + dy);
 }
 
 /** 槍の突き。射程 2 の直線に当たるものがあれば突く */
