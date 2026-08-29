@@ -119,6 +119,13 @@ function flashHit(): void {
  * 壁にぶつかった・敵が見えている・ダメージを受けた・アイテムを拾った・階を降りた・倒れた、のどれかで false。
  */
 function act(action: Action): boolean {
+  // 終わった run で操作したら、結果の画面に戻す。
+  // 閉じたあと盤面だけが残ると、何を押しても無反応で行き止まりに見える
+  if (state.over && state.recorded) {
+    reopenResult();
+    return false;
+  }
+
   const hpBefore = state.player.hp;
   const result = step(state, action);
   if (state.player.hp < hpBefore) flashHit();
@@ -140,11 +147,9 @@ function startGame(seed: string): void {
   render();
 }
 
-/** 死んだときに 1 回だけ呼ぶ。記録して結果を出す */
-function finishRun(): void {
-  state.recorded = true;
-  byId('go-title').textContent = state.cleared ? 'クリア' : 'ゲームオーバー';
-  const entry: ScoreEntry = {
+/** 今の状態から結果 1 件を組み立てる */
+function currentEntry(): ScoreEntry {
+  return {
     score: state.score,
     depth: state.depth,
     kills: state.kills,
@@ -152,9 +157,26 @@ function finishRun(): void {
     seed: state.seed,
     date: today(),
   };
+}
+
+/** 死んだときに 1 回だけ呼ぶ。記録して結果を出す */
+function finishRun(): void {
+  state.recorded = true;
+  const entry = currentEntry();
   const best = bestScore();
   const { rank } = submitScore(entry);
+  showResult(entry, rank, rank === 1 && entry.score > best);
+}
 
+/**
+ * 結果の画面を出す。
+ *
+ * 記録とは切り離してある。記録は 1 回きりだが、表示は何度でも要る。
+ * 一度しか出せないと、閉じたあとやリロードのあとに終わった盤面だけが残り、
+ * 次の run へ進む導線が ≡ からの seed 入力しか無くなる。
+ */
+function showResult(entry: ScoreEntry, rank: number | null, isBest: boolean): void {
+  byId('go-title').textContent = state.cleared ? 'クリア' : 'ゲームオーバー';
   byId('go-score').textContent = String(entry.score);
   byId('go-detail').innerHTML = '';
   const detail = [
@@ -162,7 +184,7 @@ function finishRun(): void {
     `レベル ${entry.level}`,
     `${entry.kills} 体撃破`,
     `seed ${entry.seed}`,
-    `自己最高 ${Math.max(best, entry.score)} 点`,
+    `自己最高 ${Math.max(bestScore(), entry.score)} 点`,
   ];
   for (const text of detail) {
     const li = document.createElement('li');
@@ -171,11 +193,23 @@ function finishRun(): void {
   }
 
   const rankEl = byId('go-rank');
-  if (rank === 1 && entry.score > best) rankEl.textContent = '新記録です';
+  if (isBest) rankEl.textContent = '新記録です';
   else if (rank !== null) rankEl.textContent = `ハイスコア ${rank} 位に入りました`;
   else rankEl.textContent = '';
 
   gameover.showModal();
+}
+
+/**
+ * 終わった run の結果をもう一度出す。
+ * 順位は記録し直さず、保存済みの一覧から引き直す。
+ */
+function reopenResult(): void {
+  const entry = currentEntry();
+  const i = loadScores().findIndex(
+    (e) => e.seed === entry.seed && e.score === entry.score && e.depth === entry.depth,
+  );
+  showResult(entry, i >= 0 ? i + 1 : null, false);
 }
 
 // ---------------------------------------------------------------------------
@@ -229,13 +263,16 @@ function showScores(): void {
 // ---------------------------------------------------------------------------
 // メニュー
 
-byId('menu-btn').addEventListener('click', () => {
-  seedInput.value = state.seed;
+/** メニューを開く。seed を渡すと入力欄をその値で埋める */
+function openMenu(seed: string = state.seed): void {
+  seedInput.value = seed;
   const vm = toViewModel(state);
   byId('menu-equip').textContent = `${vm.player.weaponDetail}
 ${vm.player.armorDetail}`;
   menu.showModal();
-});
+}
+
+byId('menu-btn').addEventListener('click', () => openMenu());
 byId('seed-random').addEventListener('click', () => {
   seedInput.value = randomSeedString();
 });
@@ -263,6 +300,11 @@ byId('go-retry').addEventListener('click', () => {
 byId('go-new').addEventListener('click', () => {
   startGame(randomSeedString());
   gameover.close();
+});
+// seed を選んで始めたいとき用。ランダムな seed を入れた状態でメニューを開く
+byId('go-seed').addEventListener('click', () => {
+  gameover.close();
+  openMenu(randomSeedString());
 });
 byId('go-scores').addEventListener('click', () => {
   gameover.close();
@@ -294,6 +336,10 @@ window.addEventListener('resize', () => renderer.resize());
 window.visualViewport?.addEventListener('resize', () => renderer.resize());
 
 render();
+
+// 終わった run を復元したときは、結果の画面から始める。
+// 出さないと、死んだ盤面だけが表示されて次に進む方法が分からない
+if (state.over && state.recorded) reopenResult();
 
 // --- オフライン対応 (本番ビルドのみ) ---
 if (import.meta.env.PROD && 'serviceWorker' in navigator) {

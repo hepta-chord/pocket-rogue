@@ -42,10 +42,14 @@ async function cacheFirst(req) {
   return res;
 }
 
+// 入口 (index.html など) は HTTP キャッシュを迂回して取りに行く。
+// GitHub Pages は index.html にも max-age を付けるので、素朴に fetch すると
+// ブラウザのキャッシュが応えてしまい、新しいビルドを出したあと数分は古い入口が返り続ける。
+// 入口が古いと、そこから読む assets/ のハッシュも古いままになり、更新が反映されない。
 async function networkFirst(req) {
   const cache = await caches.open(CACHE);
   try {
-    const res = await fetch(req);
+    const res = await fetch(req.url, { cache: 'no-store', credentials: 'same-origin' });
     if (res.ok) cache.put(req, res.clone());
     return res;
   } catch {

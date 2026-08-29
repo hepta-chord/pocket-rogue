@@ -202,7 +202,7 @@ const ANY = 99;
  *   系統    グレード 1   グレード 2   グレード 3
  *   群れ    B1〜B5       B9〜B14      B18〜
  *   俊敏    B2〜B8       B11〜B16     B20〜
- *   遠隔    B3〜B7       B12〜B17     B22〜
+ *   遠隔    B3〜B9       B11〜B17     B22〜
  *   戦士    B6〜B10      B14〜B19     B23〜
  *   重装    B8〜B13      B16〜B21     B25〜
  *
@@ -257,8 +257,13 @@ export const MONSTERS: Record<MonsterKind, MonsterDef> = {
   // 攻撃は直線上に飛び、**間にいるものに先に当たる**。
   // つまり通路に敵が詰まっているほど味方に当たり、当てて倒すとグレードが上がる。
   // 詰めさせるか散らすかがそのまま判断になる。
-  koboldSpear: { name: '槍コボルト', family: 'ranged', grade: 1, hp: 3, atk: 4, def: 1, evasion: 0, xp: 5, minDepth: 3, maxDepth: 7, weight: 3, maxPerFloor: 3, pack: [1, 2], passives: ['spear', 'scavenge'] },
-  koboldBow: { name: '弓コボルト', family: 'ranged', grade: 2, hp: 5, atk: 5, def: 2, evasion: 0.05, xp: 12, minDepth: 12, maxDepth: 17, weight: 3, maxPerFloor: 3, pack: [1, 2], passives: ['scavenge'], action: { kind: 'shoot', chance: 0.6 } },
+  //
+  // 他の系統より空白期間を短くしてある (B10 の 1 階だけ)。
+  // 「通路に下がって待つ」への対抗手段なので、これが抜けている階では
+  // 通路戦術が再び万能に戻ってしまい、遊び方の幅がその階だけ狭くなる。
+  // 抜くのはボス階だけにして、そこはドラゴンに場を譲る。
+  koboldSpear: { name: '槍コボルト', family: 'ranged', grade: 1, hp: 3, atk: 4, def: 1, evasion: 0, xp: 5, minDepth: 3, maxDepth: 9, weight: 3, maxPerFloor: 3, pack: [1, 2], passives: ['spear', 'scavenge'] },
+  koboldBow: { name: '弓コボルト', family: 'ranged', grade: 2, hp: 5, atk: 5, def: 2, evasion: 0.05, xp: 12, minDepth: 11, maxDepth: 17, weight: 3, maxPerFloor: 3, pack: [1, 2], passives: ['scavenge'], action: { kind: 'shoot', chance: 0.6 } },
   koboldSniper: { name: '狙撃コボルト', family: 'ranged', grade: 3, hp: 8, atk: 6, def: 3, evasion: 0.08, xp: 34, minDepth: 22, maxDepth: ANY, weight: 3, maxPerFloor: 3, pack: [1, 2], passives: ['spear'], action: { kind: 'shoot', chance: 0.7 } },
 
   // ボス: 階を代表する 1 体

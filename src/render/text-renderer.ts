@@ -11,7 +11,7 @@ import {
 } from './glyphs';
 import type { Renderer } from './renderer';
 
-const HUD_ROWS = 2;
+export const HUD_ROWS = 2;
 /**
  * ログの行数。
  *
@@ -22,7 +22,7 @@ const HUD_ROWS = 2;
  * セルの大きさは横幅で決まるため (幅/21 が 高さ/16 より小さい)、
  * 行数を増やしてもマップの表示は削られない。
  */
-const LOG_ROWS = 6;
+export const LOG_ROWS = 6;
 /**
  * ログに表示する経過ターンの上限。
  *
@@ -51,6 +51,37 @@ const TARGET_COLS = 21;
 const MIN_CELL = 12;
 const MAX_CELL = 32;
 
+/** 画面をどう割るか。canvas を触らない計算なので単体で確かめられる */
+export interface Grid {
+  /** 1 セルの一辺 (px) */
+  cell: number;
+  /** マップに使える行数 */
+  rows: number;
+  /** マップに使える列数 */
+  cols: number;
+}
+
+/**
+ * canvas の実寸から文字グリッドを決める。
+ *
+ * **マップの下端がログの上端を超えないことがこの関数の責務である。**
+ * マップは HUD の下から rows 行、ログは下端から LOG_ROWS 行ぶんを使うので、
+ * cell と rows を別々の高さから計算すると重なる。
+ * 呼び出し側が「測った高さ」と「描くときの高さ」を取り違えると同じことが起きるので、
+ * 両方をこの 1 か所から出す。
+ */
+export function gridFor(width: number, height: number): Grid {
+  // 横 21 セル前後を目標にしつつ、縦にも HUD + マップ 8 行 + ログが入る大きさに抑える
+  const byWidth = width / TARGET_COLS;
+  const byHeight = height / (HUD_ROWS + 8 + LOG_ROWS);
+  const cell = Math.max(MIN_CELL, Math.min(MAX_CELL, Math.floor(Math.min(byWidth, byHeight))));
+  return {
+    cell,
+    rows: Math.max(1, Math.floor(height / cell) - HUD_ROWS - LOG_ROWS),
+    cols: Math.max(1, Math.floor(width / cell)),
+  };
+}
+
 /** Canvas に等幅フォントで文字グリッドを描く */
 export class TextRenderer implements Renderer {
   private readonly ctx: CanvasRenderingContext2D;
@@ -60,34 +91,57 @@ export class TextRenderer implements Renderer {
   private camX = 0;
   private camY = 0;
   private lastVm: ViewModel | null = null;
+  /** 最後に測ったときの canvas の実寸。ずれたら測り直す目印にする */
+  private sizedW = -1;
+  private sizedH = -1;
 
   constructor(private readonly canvas: HTMLCanvasElement) {
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('Canvas 2D context が取得できません');
     this.ctx = ctx;
-    this.resize();
+    this.measure();
+
+    // 画面の大きさが変わらなくても canvas は縮む。
+    // スロットの中身は起動後に main.ts が組み立てるので、そのぶん #controls が高くなり、
+    // flex: 1 の canvas がその場で低くなる。window の resize では拾えない変化なので、
+    // 要素そのものを見る。
+    if (typeof ResizeObserver !== 'undefined') {
+      new ResizeObserver(() => this.resize()).observe(canvas);
+    }
   }
 
   resize(): void {
+    this.measure();
+    if (this.lastVm) this.draw(this.lastVm);
+  }
+
+  /** canvas の実寸を測り直す。描き直しはしない (draw から呼ぶので再帰させない) */
+  private measure(): void {
     const rect = this.canvas.getBoundingClientRect();
     const dpr = window.devicePixelRatio || 1;
     this.canvas.width = Math.max(1, Math.round(rect.width * dpr));
     this.canvas.height = Math.max(1, Math.round(rect.height * dpr));
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-    // 横 21 セル前後を目標にしつつ、縦にも HUD + マップ 8 行 + ログが入る大きさに抑える
-    const byWidth = rect.width / TARGET_COLS;
-    const byHeight = rect.height / (HUD_ROWS + 8 + LOG_ROWS);
-    this.cell = Math.max(MIN_CELL, Math.min(MAX_CELL, Math.floor(Math.min(byWidth, byHeight))));
-    this.cols = Math.max(1, Math.floor(rect.width / this.cell));
-    this.rows = Math.max(1, Math.floor(rect.height / this.cell) - HUD_ROWS - LOG_ROWS);
-
-    if (this.lastVm) this.draw(this.lastVm);
+    const grid = gridFor(rect.width, rect.height);
+    this.cell = grid.cell;
+    this.cols = grid.cols;
+    this.rows = grid.rows;
+    this.sizedW = rect.width;
+    this.sizedH = rect.height;
   }
 
   draw(vm: ViewModel): void {
     this.lastVm = vm;
-    const rect = this.canvas.getBoundingClientRect();
+    let rect = this.canvas.getBoundingClientRect();
+    // 測ったときと実寸が違えば測り直す。
+    // ずれたまま描くと、マップの行数が今の高さに対して多すぎてログの領域に食い込み、
+    // さらに canvas の内部解像度も合わないので画面全体が縦に潰れる。
+    // ResizeObserver が無い環境でも壊れないように、描く直前にも見る
+    if (rect.width !== this.sizedW || rect.height !== this.sizedH) {
+      this.measure();
+      rect = this.canvas.getBoundingClientRect();
+    }
     this.ctx.fillStyle = COLORS.bg;
     this.ctx.fillRect(0, 0, rect.width, rect.height);
 
