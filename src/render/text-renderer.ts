@@ -1,4 +1,4 @@
-import type { ViewModel } from '../view';
+import type { LogEntry, ViewModel } from '../view';
 import {
   CELL_GLYPHS,
   COLORS,
@@ -23,6 +23,30 @@ const HUD_ROWS = 2;
  * 行数を増やしてもマップの表示は削られない。
  */
 const LOG_ROWS = 6;
+/**
+ * ログに表示する経過ターンの上限。
+ *
+ * 6 行に増やしても、移動と待機では pushLog が呼ばれないので、
+ * 戦闘の無いまま歩き続けると開幕のシステムメッセージが居座って見え続ける。
+ * 行数だけでなく経過ターンでも切り、何も起きていない時間が続いたら自然に空にする。
+ */
+const LOG_STALE_TURNS = 20;
+
+/**
+ * 実際にログへ描く行を決める。
+ *
+ * 行数だけでなく経過ターンでも切る。canvas を使わない純粋な計算なので、
+ * text-renderer.test.ts で確かめられる。
+ */
+export function visibleLogLines(
+  log: LogEntry[],
+  turn: number,
+  rows: number = LOG_ROWS,
+  staleTurns: number = LOG_STALE_TURNS,
+): LogEntry[] {
+  return log.slice(-rows).filter((l) => turn - l.turn <= staleTurns);
+}
+
 const TARGET_COLS = 21;
 const MIN_CELL = 12;
 const MAX_CELL = 32;
@@ -199,9 +223,13 @@ export class TextRenderer implements Renderer {
   /**
    * ログを描く。
    *
-   * 見えるのは 3 行しかないので、ターンの切れ目に区切り線を入れると情報が 2 行に減る。
-   * 代わりに減光の単位を行からターンに変え、最新ターンの行だけを明るくする。
-   * 行数を使わずに「どこまでが今の 1 手の結果か」が読める。
+   * 区切り線を入れると行数がさらに減るので、代わりに減光の単位を行からターンに変え、
+   * 最新ターンの行だけを明るくする。行数を使わずに「どこまでが今の 1 手の結果か」が読める。
+   *
+   * 移動や待機だけでは pushLog が呼ばれないので、戦闘の無いまま歩き続けると
+   * 何ターン経っても同じ行が残り続ける。開幕のシステムメッセージ (セーブ形式の警告など)
+   * が居座って見えるのはこのためである。行数だけでなく経過ターンでも切るようにして、
+   * 何も起きていない時間が続いたら自然に空になるようにする。
    */
   private drawLog(vm: ViewModel, height: number): void {
     const { ctx, cell } = this;
@@ -209,7 +237,7 @@ export class TextRenderer implements Renderer {
     ctx.font = `${size}px ${FONT_STACK}`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    const lines = vm.log.slice(-LOG_ROWS);
+    const lines = visibleLogLines(vm.log, vm.turn);
     const latest = lines.length > 0 ? lines[lines.length - 1].turn : 0;
     const base = height - LOG_ROWS * cell;
     for (let i = 0; i < lines.length; i++) {
