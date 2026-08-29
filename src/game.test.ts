@@ -512,6 +512,45 @@ describe('魔法', () => {
 
     expect(groupDmg).toBeGreaterThan(soloDmg);
   });
+
+  it('雷耐性を持つ敵には通らない', () => {
+    const s = newGame('SP6');
+    const spot = neighborOf(s, s.player);
+    if (!spot) return;
+    const boss = createMonster('dragon', 10, spot.x, spot.y, 900);
+    boss.hp = 999;
+    s.monsters = [boss];
+    step(s, { type: 'cast', spell: 'thunder' });
+    expect(boss.hp).toBe(999);
+    expect(s.log.some((l) => l.text.includes('雷が効かない'))).toBe(true);
+  });
+
+  it('耐性持ちは巻き込み数に数えない', () => {
+    // ボスの隣に雑魚が 1 体だけなら、単体で撃ったときと同じ威力になる
+    const withBoss = newGame('SP7');
+    const spotA = neighborOf(withBoss, withBoss.player);
+    if (!spotA) return;
+    const mob = createMonster('rat', 10, spotA.x, spotA.y, 901);
+    mob.hp = 9999;
+    const boss = createMonster('dragon', 10, spotA.x, spotA.y, 902);
+    boss.hp = 9999;
+    withBoss.monsters = [mob, boss];
+    const beforeA = mob.hp;
+    step(withBoss, { type: 'cast', spell: 'thunder' });
+    const withBossDmg = beforeA - mob.hp;
+
+    const alone = newGame('SP7');
+    const spotB = neighborOf(alone, alone.player);
+    if (!spotB) return;
+    const solo = createMonster('rat', 10, spotB.x, spotB.y, 903);
+    solo.hp = 9999;
+    alone.monsters = [solo];
+    const beforeB = solo.hp;
+    step(alone, { type: 'cast', spell: 'thunder' });
+    const soloDmg = beforeB - solo.hp;
+
+    expect(withBossDmg).toBe(soloDmg);
+  });
 });
 
 describe('消耗品の所持上限', () => {
@@ -638,9 +677,10 @@ describe('長居への対策', () => {
   });
 
   it('予告が出るのは、普通の探索より十分あとである', () => {
-    // 盤面の縮小、迷路の輪づくり、敵の予算削減で 1 階の滞在は 60〜110 ターンになった。
-    // 長居の判定はそれに合わせてあり、深い階の滞在のおよそ 1.8 倍で予告が出る
-    expect(STALKER_WARN).toBeGreaterThan(180);
+    // 1 階の滞在は中央値 64 ターン、90% 点で 121 ターンである。
+    // 長居の判定は中央値のおよそ 1.9 倍で予告、2.3 倍で出現になるよう置いてある。
+    // 200 / 250 まで上げていた頃は、出現に達するフロアが 2% しかなく機能していなかった
+    expect(STALKER_WARN).toBeGreaterThan(100);
     expect(STALKER_TURN).toBeGreaterThan(STALKER_WARN);
   });
 

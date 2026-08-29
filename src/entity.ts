@@ -55,8 +55,18 @@ export interface Actor {
  * - split: 近接攻撃を受けて生き残ると HP を半分にして 2 匹に割れる
  * - mimic: 落ちている武器に化けている。隣に来るか殴られるまで動かず、武器として見える
  * - reach: 壁の角越しに攻撃が届く。通常の敵は角を回り込めない
+ * - wardThunder: 雷が効かない。範囲攻撃で押し切られる相手にだけ持たせる
  */
-export type Passive = 'fast' | 'slow' | 'regen' | 'erratic' | 'phasing' | 'split' | 'mimic' | 'reach';
+export type Passive =
+  | 'fast'
+  | 'slow'
+  | 'regen'
+  | 'erratic'
+  | 'phasing'
+  | 'split'
+  | 'mimic'
+  | 'reach'
+  | 'wardThunder';
 
 /**
  * アクション: 条件が揃ったとき確率で使う技。使わなかったら通常行動。
@@ -219,12 +229,12 @@ export const MONSTERS: Record<MonsterKind, MonsterDef> = {
   slimeMimic: { name: '擬態スライム', family: 'odd', grade: 3, hp: 10, atk: 4, def: 2, evasion: 0.05, xp: 30, minDepth: 21, maxDepth: ANY, weight: 3, maxPerFloor: 3, pack: [1, 1], passives: ['split', 'phasing', 'mimic'] },
 
   // ボス: 階を代表する 1 体
-  dragon: { name: 'ドラゴン', family: 'boss', grade: 0, hp: 20, atk: 8, def: 4, evasion: 0, xp: 40, bounty: 120, minDepth: 10, maxDepth: ANY, weight: 0, maxPerFloor: 1, pack: [1, 1], passives: [], action: { kind: 'breath', chance: 0.3 } },
+  dragon: { name: 'ドラゴン', family: 'boss', grade: 0, hp: 20, atk: 8, def: 4, evasion: 0, xp: 40, bounty: 120, minDepth: 10, maxDepth: ANY, weight: 0, maxPerFloor: 1, pack: [1, 1], passives: ['wardThunder'], action: { kind: 'breath', chance: 0.3 } },
 
   // 長居への対策。通常の配置では出ず、フロア内のターン数で呼ばれる。
   // 勝てない強さだが、逃げ切れるように fast は付けない。
   // 経験値を 0 にしてあるので、倒せてしまっても成長が壊れない。
-  stalker: { name: '追う者', family: 'boss', grade: 0, hp: 150, atk: 9, def: 10, evasion: 0, xp: 0, bounty: 300, minDepth: 1, maxDepth: ANY, weight: 0, maxPerFloor: 1, pack: [1, 1], passives: [], action: { kind: 'smash', chance: 0.3 } },
+  stalker: { name: '追う者', family: 'boss', grade: 0, hp: 150, atk: 9, def: 10, evasion: 0, xp: 0, bounty: 300, minDepth: 1, maxDepth: ANY, weight: 0, maxPerFloor: 1, pack: [1, 1], passives: ['wardThunder'], action: { kind: 'smash', chance: 0.3 } },
 };
 
 /** 長居への対策として呼ばれる敵 */

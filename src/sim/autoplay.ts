@@ -6,7 +6,7 @@
 //
 // GameState と step() が DOM を触らないので、そのまま Node で回せる。
 
-import { BOSS, type Actor } from '../entity';
+import { BOSS, STALKER, type Actor } from '../entity';
 import {
   canCast,
   isBossFloor,
@@ -246,6 +246,15 @@ function decide(state: GameState, policy: Policy, memo: Memo): Action {
   }
   if (seen.length >= policy.thunderAt && ratio <= 0.5 && canCast(state, 'thunder')) {
     return { type: 'cast', spell: 'thunder' };
+  }
+
+  // 追う者が見えたら階段へ逃げる。
+  // 勝てないが速くはないので逃げ切れる、というのが設計上の位置づけである。
+  // この判断を持たせないと、留まって殴り続けて死ぬだけになり、
+  // 出現ターンの閾値を「逃げられない相手」として過剰に緩く見積もってしまう
+  if (seen.some((m) => m.kind === STALKER)) {
+    const flee = stepTowardStairs(state);
+    if (flee) return flee;
   }
 
   // 角越しには殴れないので、届く敵だけを隣接とみなす

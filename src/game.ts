@@ -133,9 +133,9 @@ export const GATE_SLACK = 6;
 /** 減衰で失った経験値がこの量たまるごとに、追う者の時計が 1 ターン進む */
 export const STALKER_PRESSURE_PER = 5;
 
-export const STALKER_WARN = 200;
+export const STALKER_WARN = 120;
 /** 追う者が現れるフロア内ターン数 */
-export const STALKER_TURN = 250;
+export const STALKER_TURN = 150;
 
 /** 魔法。コストはスタミナで払う */
 export type SpellKind = 'thunder';
@@ -957,14 +957,24 @@ export function canCast(state: GameState, spell: SpellKind): boolean {
 function castSpell(state: GameState, rng: Rng, spell: SpellKind): void {
   switch (spell) {
     case 'thunder': {
-      const targets = visibleMonsters(state);
-      if (targets.length === 0) {
+      const seen = visibleMonsters(state);
+      if (seen.length === 0) {
         pushLog(state, 'player', '雷を放ったが、周りに敵はいなかった。');
         return;
       }
+      // 雷耐性を持つ相手には通らない。範囲攻撃で押し切られると
+      // ボスがボスとして機能しないので、そこだけ通用しない札にしてある
+      const warded = seen.filter((m) => hasPassive(m.kind, 'wardThunder'));
+      const targets = seen.filter((m) => !hasPassive(m.kind, 'wardThunder'));
+      for (const m of warded) {
+        pushLog(state, 'alert', `${actorName(m.kind)}には雷が効かない。`);
+      }
+      if (targets.length === 0) return;
+
       // 単体のときの威力は据え置き、巻き込んだ数だけ上乗せする。
       // 群れに囲まれてから 1 体ずつ削るより、まとめて晴らす方が得になるようにする。
-      // 通路に下がって 1 対 1 を作る戦術とぶつからないよう、単体では変わらない
+      // 通路に下がって 1 対 1 を作る戦術とぶつからないよう、単体では変わらない。
+      // 数えるのは実際に通る相手だけで、耐性持ちは頭数に入れない
       const dmg = 6 + state.depth * 2 + THUNDER_GROUP_BONUS * (targets.length - 1);
       for (const m of targets) m.hp -= dmg;
       const dead = targets.filter((m) => m.hp <= 0);
