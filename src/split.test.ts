@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { SLIME_CAP, SPLIT_REWARD, createMonster, xpFor, MONSTERS } from './entity';
-import { newGame, step, type GameState } from './game';
+import { GATE_SLACK, gateRate, newGame, step, type GameState } from './game';
 import { Tile } from './map';
 
 /** 開けた 9 x 9 の部屋を作り、中央にプレイヤーを置く */
@@ -88,5 +88,34 @@ describe('分裂', () => {
     const base = xpFor(MONSTERS.slimeSplit, 11);
     expect(gain('SPLIT3', false)).toBe(base);
     expect(gain('SPLIT4', true)).toBe(Math.ceil(base * SPLIT_REWARD));
+  });
+});
+
+describe('経験値ゲート', () => {
+  it('基準線以下では減衰しない', () => {
+    expect(gateRate(1, 1)).toBe(1);
+    expect(gateRate(10, 5)).toBe(1);
+    // ちょうど基準線でも減らない
+    expect(gateRate(5 + GATE_SLACK, 5)).toBe(1);
+  });
+
+  it('超えた 1 レベルにつき 1/2、1/3 と落ちる', () => {
+    expect(gateRate(6 + GATE_SLACK, 5)).toBeCloseTo(1 / 2, 10);
+    expect(gateRate(7 + GATE_SLACK, 5)).toBeCloseTo(1 / 3, 10);
+    expect(gateRate(8 + GATE_SLACK, 5)).toBeCloseTo(1 / 4, 10);
+  });
+
+  it('増幅はしない。降りただけでは強くならない', () => {
+    for (let depth = 1; depth <= 30; depth++) {
+      for (let level = 1; level <= 40; level++) {
+        expect(gateRate(level, depth)).toBeLessThanOrEqual(1);
+      }
+    }
+  });
+
+  it('深く潜ると減衰が解ける', () => {
+    const level = 20;
+    expect(gateRate(level, 5)).toBeLessThan(gateRate(level, 10));
+    expect(gateRate(level, 20)).toBe(1);
   });
 });

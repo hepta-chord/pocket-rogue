@@ -258,11 +258,18 @@ export function createPlayer(x: number, y: number): Actor {
   return { id: 0, kind: 'player', x, y, hp: 20, maxHp: 20, atk: PLAYER_BASE_ATK, def: 0, evasion: 0 };
 }
 
-/** 階の深さに応じて強くした個体を作る */
+/**
+ * 階の深さに応じて強くした個体を作る。
+ *
+ * HP の伸びは深さの 3/4 にしてある。もとは等倍だったが、これは
+ * レベルが階に対して 1.7 ずつ伸びていた頃の値である。
+ * 経験値ゲートでレベルを抑えたぶん、敵の伸びも緩めないと深層が成立しない。
+ * 等倍のままだと 200 run の B20 到達率が 20% から 10% に落ちる。
+ */
 export function createMonster(kind: MonsterKind, depth: number, x: number, y: number, id: number): Actor {
   const m = MONSTERS[kind];
   const bonus = Math.max(0, depth - m.minDepth);
-  const hp = m.hp + bonus;
+  const hp = m.hp + Math.floor((bonus * 3) / 4);
   return {
     id,
     kind,
@@ -280,7 +287,7 @@ export function createMonster(kind: MonsterKind, depth: number, x: number, y: nu
  * 階ごとの配置。人数の予算を、出現条件を満たす敵から重みで選んで埋める。
  * 群れは 1 回の抽選でまとめて置き、上限のある敵は数える。
  *
- * 予算は階の半分で伸ばす。1 階の滞在ターンを短くするための削減であり、
+ * 予算は階の 3/4 で伸ばす。1 階の滞在ターンを短くするための削減であり、
  * 掃討にかかる手数がそのまま滞在時間になっていた。
  * 群れの pack は削らない。数で押す系統なので、頭数を削ると包囲が成立しなくなる。
  */
@@ -291,7 +298,7 @@ export function spawnMonsters(
   avoid: { x: number; y: number },
   nextId: () => number,
 ): Actor[] {
-  const budget = 3 + Math.floor(depth / 2) + rng.int(0, 1);
+  const budget = 3 + Math.floor((depth * 3) / 4) + rng.int(0, 1);
   const monsters: Actor[] = [];
   const counts: Partial<Record<MonsterKind, number>> = {};
 

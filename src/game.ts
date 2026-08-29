@@ -113,6 +113,17 @@ export const SPAWN_INTERVAL = 25;
 const SPAWN_REWARD = 0.5;
 // 1 階の滞在は普通に探索しても 100〜120 ターンほどなので、その倍を超えたあたりから圧をかける
 /** 追う者の予告が出るフロア内ターン数 */
+/**
+ * レベルの基準線の余裕。level が depth + GATE_SLACK を超えると取得経験値が減る。
+ *
+ * 減衰だけをかけ、増幅はしない。下回ったときに増やすと、階段直行で潜って
+ * 深い階で一気に回収する抜け道ができ、「階層を降りただけでは強くならない」と衝突する。
+ */
+export const GATE_SLACK = 6;
+
+/** 減衰で失った経験値がこの量たまるごとに、追う者の時計が 1 ターン進む */
+export const STALKER_PRESSURE_PER = 5;
+
 export const STALKER_WARN = 200;
 /** 追う者が現れるフロア内ターン数 */
 export const STALKER_TURN = 250;
@@ -146,7 +157,7 @@ export interface StepResult {
   interrupt: boolean;
 }
 
-export const SAVE_VERSION = 14;
+export const SAVE_VERSION = 15;
 
 /**
  * 次のレベルまでに必要な経験値。
@@ -160,6 +171,18 @@ export const SAVE_VERSION = 14;
  */
 export function xpToNext(level: number): number {
   return 6 + (level * (level + 1)) / 2;
+}
+
+/**
+ * 取得経験値の倍率。
+ *
+ * レベルが階数に対して進みすぎていると減る。1 を超えることはない。
+ * 基準線は depth + GATE_SLACK で、降りれば上がるので減衰が解ける。
+ * 「追われる前に降りろ」という既存の圧と同じ向きを指している。
+ */
+export function gateRate(level: number, depth: number): number {
+  const over = level - (depth + GATE_SLACK);
+  return over <= 0 ? 1 : 1 / (1 + over);
 }
 
 /** 階に到達したときのスコア */
@@ -194,6 +217,10 @@ export interface GameState {
   floorTurn: number;
   /** 追う者を呼んだか。1 階に 1 度だけ */
   stalkerCalled: boolean;
+  /** 予告を出したか。圧力で時計が飛んでも予告を飛ばさないために持つ */
+  stalkerWarned: boolean;
+  /** 頭打ちの状態で狩ったぶん、追う者の時計を進める量 */
+  stalkerPressure: number;
   /** 視界が狭い階 */
   dark: boolean;
   /** モンスターハウスのある部屋の添字。無ければ -1 */
@@ -284,6 +311,8 @@ export function newGame(seed: string): GameState {
     effects: {},
     floorTurn: 0,
     stalkerCalled: false,
+    stalkerWarned: false,
+    stalkerPressure: 0,
     dark: false,
     houseRoom: -1,
     houseArmed: false,
@@ -549,6 +578,8 @@ function descend(state: GameState, rng: Rng): void {
   state.effects = {};
   state.floorTurn = 0;
   state.stalkerCalled = false;
+  state.stalkerWarned = false;
+  state.stalkerPressure = 0;
   placeHouse(state, rng);
   placeBoss(state, rng);
   state.visible = new Array<number>(MAP_W * MAP_H).fill(0);
@@ -1097,7 +1128,20 @@ function rewardKill(state: GameState, m: Actor): void {
   const def = MONSTERS[m.kind as MonsterKind];
   const rate = (m.spawned ? SPAWN_REWARD : 1) * (m.split ? SPLIT_REWARD : 1);
   state.score += Math.ceil(bountyFor(def, state.depth) * rate);
-  gainXp(state, Math.ceil(xpFor(def, state.depth) * rate));
+
+  const full = Math.ceil(xpFor(def, state.depth) * rate);
+  const gate = gateRate(state.level, state.depth);
+  const got = Math.ceil(full * gate);
+  const lost = full - got;
+
+  // 減衰したぶんはスコアに回す。基準線に張り付いても倒す動機が残るようにする。
+  // 同時に追う者の時計を進める。頭打ちの状態で狩り続けることにコストを付ける
+  if (lost > 0) {
+    state.score += lost;
+    state.stalkerPressure += Math.floor(lost / STALKER_PRESSURE_PER);
+    pushLog(state, 'info', `経験値 ${got} (深さに対してレベルが高いため ${full} から減った)。`);
+  }
+  gainXp(state, got);
 }
 
 /**
@@ -1437,13 +1481,18 @@ function tickFloorPressure(state: GameState, rng: Rng): void {
 
   if (state.stalkerCalled) return;
 
-  if (state.floorTurn === STALKER_WARN) {
-    // 階段の位置を把握できていない段階で出ると詰むので、方角だけ添えて予告する
+  // 頭打ちの状態で狩ったぶん、時計が進む
+  const clock = state.floorTurn + state.stalkerPressure;
+
+  if (!state.stalkerWarned && clock >= STALKER_WARN) {
+    // 階段の位置を把握できていない段階で出ると詰むので、方角だけ添えて予告する。
+    // 圧力で時計が飛んでも、予告だけは必ず 1 回出す
+    state.stalkerWarned = true;
     pushLog(state, 'alert', `地響きが近づいてくる。階段は${stairsDirection(state)}にある。`);
     return;
   }
 
-  if (state.floorTurn >= STALKER_TURN) {
+  if (clock >= STALKER_TURN) {
     const m = placeMonster(rng, state.map, STALKER, state.depth, state.monsters, () => state.nextId++, (x, y) =>
       outOfSight(state, x, y),
     );

@@ -72,7 +72,13 @@ const WEIGHTS: Record<ItemKind, number> = { potion: 6, elixir: 4, weapon: 4, arm
 const KINDS = (Object.keys(WEIGHTS) as ItemKind[]).filter((k) => WEIGHTS[k] > 0);
 
 /** 敵を倒したときに装備を落とす確率 */
-export const DROP_CHANCE = 0.16;
+/**
+ * 撃破 1 回あたりに装備を落とす確率。
+ *
+ * 敵の予算を削ったぶん階あたりの撃破数が減るので、
+ * 装備の入手機会が変わらないように少し上げてある。
+ */
+export const DROP_CHANCE = 0.2;
 
 /** ドロップのうち、系統に関係ない変わり種が出る割合 */
 const DROP_ODDITY_RATE = 0.2;
