@@ -17,13 +17,13 @@ import type { Rng } from './rng';
 
 // 消耗品は 2 種だけにする。
 // 雷は魔法 (スタミナ消費) に、地図は床のイベント効果に移した。
-export type ConsumableKind = 'potion' | 'elixir';
+export type ConsumableKind = 'potion' | 'elixir' | 'map';
 export type EquipKind = EquipSlot;
 /** 拾うとスコアになるだけの品。ボスが落とす */
 export type TreasureKind = 'treasure';
 export type ItemKind = ConsumableKind | EquipKind | TreasureKind;
 
-export const CONSUMABLES: readonly ConsumableKind[] = ['potion', 'elixir'];
+export const CONSUMABLES: readonly ConsumableKind[] = ['potion', 'elixir', 'map'];
 
 export interface Item {
   kind: ItemKind;
@@ -47,6 +47,7 @@ export type Inventory = Record<ConsumableKind, number>;
 export const ITEM_NAMES: Record<ItemKind, string> = {
   potion: 'HP 回復薬',
   elixir: 'スタミナ薬',
+  map: '地図',
   weapon: '武器',
   armor: '防具',
   treasure: '財宝',
@@ -58,7 +59,7 @@ export const ITEM_NAMES: Record<ItemKind, string> = {
  * スタミナ薬を無制限に持ち歩けるとスタミナ切れのペナルティが無効になり、
  * 居座って稼ぐのが最適解に戻る。
  */
-export const STACK_LIMITS: Record<ConsumableKind, number> = { potion: 5, elixir: 3 };
+export const STACK_LIMITS: Record<ConsumableKind, number> = { potion: 5, elixir: 3, map: 2 };
 
 export function stackLimit(kind: ConsumableKind): number {
   return STACK_LIMITS[kind];
@@ -68,7 +69,7 @@ export function stackLimit(kind: ConsumableKind): number {
 // 武器の重みを上げて、1 個あたりの重みを下げる。
 // 回復薬は 1 個あたりの量を下げたぶん、出る数を増やしてある。
 // 財宝は床には出ない。ボスを倒したときだけ落ちる
-const WEIGHTS: Record<ItemKind, number> = { potion: 6, elixir: 4, weapon: 4, armor: 3, treasure: 0 };
+const WEIGHTS: Record<ItemKind, number> = { potion: 6, elixir: 4, map: 3, weapon: 4, armor: 3, treasure: 0 };
 const KINDS = (Object.keys(WEIGHTS) as ItemKind[]).filter((k) => WEIGHTS[k] > 0);
 
 /** 敵を倒したときに装備を落とす確率 */
@@ -80,11 +81,8 @@ const KINDS = (Object.keys(WEIGHTS) as ItemKind[]).filter((k) => WEIGHTS[k] > 0)
  */
 export const DROP_CHANCE = 0.2;
 
-/** ドロップのうち、系統に関係ない変わり種が出る割合 */
-const DROP_ODDITY_RATE = 0.2;
-
 export function emptyInventory(): Inventory {
-  return { potion: 0, elixir: 0 };
+  return { potion: 0, elixir: 0, map: 0 };
 }
 
 export function isEquip(kind: ItemKind): kind is EquipKind {
@@ -129,25 +127,32 @@ export function pickFloorEquip(rng: Rng, kind: EquipKind): EquipId {
 }
 
 /**
+ * 系統ごとのドロップ率の倍率。
+ *
+ * 手強い相手ほど良いものを落とす。狩る対象を選ぶ判断がここに乗る。
+ * 数で出る系統を高くすると、雑魚狩りが装備集めとして最適になってしまう。
+ */
+export const FAMILY_DROP_RATE: Record<MonsterFamily, number> = {
+  swarm: 0.5,
+  swift: 0.7,
+  warrior: 1,
+  odd: 1.2,
+  heavy: 1.8,
+  boss: 1,
+};
+
+/**
  * 倒した敵が落とす装備を選ぶ。
  *
- * その系統に効く装備を、その系統が落とす。
- * グレードが上がる階をまたいで効いてくるので、同じグレード内では手に入らず循環しない。
- * 戦士だけが落とす形にすると戦士ばかり狩られるので、系統ごとに分ける意味がある。
+ * ドロップ限定の品からしか出ない。床に出る品とは重ならないので、
+ * 拾うことと狩ることが別の意味を持つ。
  */
-export function pickDropEquip(rng: Rng, family: MonsterFamily): EquipId | null {
-  const oddities: EquipId[] = [
+export function pickDropEquip(rng: Rng, _family: MonsterFamily): EquipId | null {
+  const pool: EquipId[] = [
     ...WEAPON_IDS.filter((id) => WEAPONS[id].dropOnly),
     ...ARMOR_IDS.filter((id) => ARMORS[id].dropOnly),
   ];
-  if (rng.chance(DROP_ODDITY_RATE)) return rng.pick(oddities);
-
-  const matched: EquipId[] = [
-    ...WEAPON_IDS.filter((id) => WEAPONS[id].bane === family),
-    ...ARMOR_IDS.filter((id) => ARMORS[id].bane === family),
-  ];
-  if (matched.length === 0) return oddities.length > 0 ? rng.pick(oddities) : null;
-  return rng.pick(matched);
+  return pool.length > 0 ? rng.pick(pool) : null;
 }
 
 /** 装備 1 点ぶんの床アイテムを作る */

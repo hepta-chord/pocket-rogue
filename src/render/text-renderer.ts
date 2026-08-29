@@ -12,7 +12,17 @@ import {
 import type { Renderer } from './renderer';
 
 const HUD_ROWS = 2;
-const LOG_ROWS = 3;
+/**
+ * ログの行数。
+ *
+ * 3 行だと、階に入った直後のシステムメッセージだけで埋まる。
+ * 移動や待機ではログが出ないので、敵に会うまで同じ 3 行が残り続けていた。
+ * 6 行あれば戦闘のログと混ざるので、直前の 1 手の結果が読める。
+ *
+ * セルの大きさは横幅で決まるため (幅/21 が 高さ/16 より小さい)、
+ * 行数を増やしてもマップの表示は削られない。
+ */
+const LOG_ROWS = 6;
 const TARGET_COLS = 21;
 const MIN_CELL = 12;
 const MAX_CELL = 32;

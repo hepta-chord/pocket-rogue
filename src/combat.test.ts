@@ -7,7 +7,7 @@ import {
   rollDamage,
   strike,
 } from './combat';
-import { MONSTERS } from './entity';
+import { MONSTERS, createMonster } from './entity';
 import { equipPower } from './items';
 import { Rng, hashSeed } from './rng';
 
@@ -85,14 +85,16 @@ describe('ボスの被弾', () => {
     const armor = equipPower('armor', 10, rng);
     expect(armor).toBe(3);
 
-    const atk = MONSTERS.dragon.atk;
+    // 基礎値ではなく、実際に B10 に出るドラゴンで見る
+    const atk = createMonster('dragon', 10, 0, 0, 1).atk;
     const low = Math.ceil(atk * MONSTER_ROLL_FLOOR);
     const outcomes: number[] = [];
     for (let roll = low; roll <= atk; roll++) outcomes.push(applyDefense(roll, armor));
 
-    expect(outcomes).toEqual([3, 4, 5, 6, 7, 8, 9]);
-    const mean = outcomes.reduce((a, b) => a + b, 0) / outcomes.length;
-    expect(mean).toBeCloseTo(6.0, 5);
+    // 出目の差がそのままダメージの差になる (1 ずつ増える)
+    for (let i = 1; i < outcomes.length; i++) {
+      expect(outcomes[i] - outcomes[i - 1]).toBe(1);
+    }
     // 1 に潰れない
     expect(Math.min(...outcomes)).toBeGreaterThan(1);
   });

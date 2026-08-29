@@ -17,7 +17,9 @@ export type CellKind =
   | 'floorGreen'
   | 'floorYellow'
   | 'floorRed'
-  | 'floorBlue';
+  | 'floorBlue'
+  /** 見つかった罠。踏むまで見えない */
+  | 'trap';
 export type Visibility = 'visible' | 'remembered' | 'unknown';
 
 export interface ViewCell {

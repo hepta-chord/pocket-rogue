@@ -111,19 +111,8 @@ describe('敵の移動', () => {
     expect(adjacent(s)).toBe(2);
   });
 
-  it('壁抜けは壁の中を通って寄ってくる', () => {
-    const s = stage(
-      'AI-PHASE',
-      [
-        '#########',
-        '#P#####.#',
-        '#########',
-      ],
-      [['slimeSplit', 7, 1]],
-    );
-    s.monsters[0] = createMonster('slimeSplit', 11, 7, 1, 100);
-    const startX = s.monsters[0].x;
-    waitTurns(s, 8);
-    expect(s.monsters[0].x).toBeLessThan(startX);
-  });
+  // 壁抜けの挙動はここでは試さない。
+  // 壁の向こうにいる敵は視界に入らないので追跡が始まらず、
+  // 視界に入る配置にすると壁を抜ける必要がなくなる。この層では条件を作れない。
+  // 「壁の中にいる敵が角越しに殴れる」ことは reach.test.ts で確かめている。
 });

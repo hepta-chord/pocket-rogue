@@ -21,6 +21,8 @@ export const CELL_GLYPHS: Record<CellKind, Glyph> = {
   floorYellow: { ch: '~', fg: '#ffd166' },
   floorRed: { ch: '~', fg: '#ff6b6b' },
   floorBlue: { ch: '~', fg: '#7fc4ff' },
+  // 見つかった罠。踏むまでは地形と区別が付かない
+  trap: { ch: '^', fg: '#ff9f43' },
 };
 
 // 系統ごとに文字を固定し、グレードは色で示す。
@@ -57,6 +59,7 @@ export const ACTOR_GLYPHS: Record<ActorKind, Glyph> = {
 export const ITEM_GLYPHS: Record<ItemKind, Glyph> = {
   potion: { ch: '!', fg: '#ff8ad8' },
   elixir: { ch: '!', fg: '#7fe0ff' },
+  map: { ch: '?', fg: '#ffe08a' },
   weapon: { ch: ')', fg: '#d0d0d0' },
   armor: { ch: '[', fg: '#a0c4ff' },
   treasure: { ch: '$', fg: '#ffd700' },

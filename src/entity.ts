@@ -160,56 +160,71 @@ export function bountyFor(def: MonsterDef, depth: number): number {
 
 const ANY = 99;
 
-/** グレードが切り替わる間隔 (階) */
-export const GRADE_SPAN = 10;
-
-/** その階のグレード。31 階以降は 3 のまま据え置く */
-export function gradeAt(depth: number): number {
-  return Math.min(3, Math.floor((depth - 1) / GRADE_SPAN) + 1);
-}
-
 /**
  * 敵の定義表。
  *
- * グレードの境目で数値が飛ばないように、次のグレードの基礎値は
- * 前のグレードが最深部で持つ値 (createMonster の深さ補正込み) から続くように置いてある。
- * 例: 群れのグレード 1 は B10 で HP 12 になるので、グレード 2 の基礎 HP は 14 にしてある。
+ * 5 系統 × 3 グレード + ボス 2 種である。
+ * 系統ごとに文字と基になる生き物を固定し、名前の修飾でグレードを示す。
  *
- * 系統ごとに文字と base の生き物を固定し、名前の修飾でグレードを示す。
+ * **系統ごとに出る帯をずらし、あいだに空白期間を置いてある。**
+ * 1 つの階に出るのは 2〜5 系統だけで、全部が揃うのは最深部だけである。
+ * 全系統が全階に出ると、10 階のあいだ顔ぶれが変わらず、階の特色が出ない。
+ *
+ * 30F でクリアになるので、12 種すべてが B25 までに出そろうように詰めてある。
+ *
+ *   系統    グレード 1   グレード 2   グレード 3
+ *   群れ    B1〜B5       B9〜B14      B18〜
+ *   俊敏    B2〜B8       B11〜B16     B20〜
+ *   戦士    B6〜B10      B14〜B19     B23〜
+ *   重装    B8〜B13      B16〜B21     B25〜
+ *
+ * 変則は上の巡回に入れず、全階に出る特殊枠として扱う。
+ * 分裂・壁抜け・擬態は「通常の戦い方が通じない」ための性質なので、
+ * どの深さにも 1 つはある方が、戦い方の幅として機能する。
+ * そのぶん数値の伸びは GROWTH で緩めてある。
+ *
+ *   変則    B1〜B10      B11〜B20     B21〜
+ *
+ * どの帯にも上限のない系統 (群れ・俊敏・戦士) が 1 つは含まれるようにしてある。
+ * 上限のある系統だけになると、人数の予算を埋められず階が薄くなる。
+ *
+ * 基礎値は、その系統が帯に入る階で他系統と釣り合う水準に置いてある。
+ * 深さ補正は minDepth 起点なので、帯の頭では基礎値がそのまま出る。
  */
 export const MONSTERS: Record<MonsterKind, MonsterDef> = {
-  // 群れ: 1 体は弱く数で押す。グレードが上がると付与攻撃を持つ
-  rat: { name: 'ネズミ', family: 'swarm', grade: 1, hp: 3, atk: 1, def: 0, evasion: 0, xp: 2, minDepth: 1, maxDepth: 10, weight: 5, maxPerFloor: ANY, pack: [2, 3], passives: [] },
-  ratPoison: { name: '毒ネズミ', family: 'swarm', grade: 2, hp: 14, atk: 5, def: 2, evasion: 0, xp: 8, minDepth: 11, maxDepth: 20, weight: 5, maxPerFloor: ANY, pack: [2, 4], passives: [], action: { kind: 'poison', chance: 0.25 } },
-  ratRot: { name: '腐れネズミ', family: 'swarm', grade: 3, hp: 26, atk: 9, def: 4, evasion: 0, xp: 24, minDepth: 21, maxDepth: ANY, weight: 5, maxPerFloor: ANY, pack: [3, 5], passives: [], action: { kind: 'corrodeHit', chance: 0.2 } },
+  // 群れ: 1 体は弱く数で押す。1 体ずつなら軽いが、囲まれると 1 ターンで大きく削られる。
+  // B1 から死にうる水準にしてある。序盤が安全だと、判断を覚えないまま深層まで来てしまう
+  rat: { name: 'ネズミ', family: 'swarm', grade: 1, hp: 2, atk: 5, def: 0, evasion: 0, xp: 2, minDepth: 1, maxDepth: 5, weight: 5, maxPerFloor: ANY, pack: [4, 6], passives: [] },
+  ratPoison: { name: '毒ネズミ', family: 'swarm', grade: 2, hp: 5, atk: 4, def: 1, evasion: 0, xp: 6, minDepth: 9, maxDepth: 14, weight: 5, maxPerFloor: ANY, pack: [3, 4], passives: [], action: { kind: 'poison', chance: 0.25 } },
+  ratRot: { name: '腐れネズミ', family: 'swarm', grade: 3, hp: 7, atk: 5, def: 2, evasion: 0, xp: 20, minDepth: 18, maxDepth: ANY, weight: 5, maxPerFloor: ANY, pack: [3, 5], passives: [], action: { kind: 'corrodeHit', chance: 0.2 } },
 
   // 俊敏: 速い、逃げられない。グレードが上がると跳躍が付く
-  bat: { name: 'コウモリ', family: 'swift', grade: 1, hp: 4, atk: 3, def: 0, evasion: 0.1, xp: 3, minDepth: 1, maxDepth: 10, weight: 3, maxPerFloor: ANY, pack: [1, 1], passives: ['fast', 'erratic'] },
-  batGale: { name: '疾風コウモリ', family: 'swift', grade: 2, hp: 15, atk: 7, def: 2, evasion: 0.12, xp: 10, minDepth: 11, maxDepth: 20, weight: 3, maxPerFloor: ANY, pack: [1, 2], passives: ['fast', 'erratic'], action: { kind: 'leap', chance: 0.4 } },
-  batStorm: { name: '雷コウモリ', family: 'swift', grade: 3, hp: 27, atk: 11, def: 4, evasion: 0.15, xp: 30, minDepth: 21, maxDepth: ANY, weight: 3, maxPerFloor: ANY, pack: [1, 2], passives: ['fast', 'erratic'], action: { kind: 'leap', chance: 0.5 } },
+  bat: { name: 'コウモリ', family: 'swift', grade: 1, hp: 4, atk: 5, def: 0, evasion: 0.1, xp: 3, minDepth: 2, maxDepth: 8, weight: 3, maxPerFloor: ANY, pack: [1, 2], passives: ['fast', 'erratic'] },
+  batGale: { name: '疾風コウモリ', family: 'swift', grade: 2, hp: 5, atk: 5, def: 1, evasion: 0.12, xp: 9, minDepth: 11, maxDepth: 16, weight: 3, maxPerFloor: ANY, pack: [1, 2], passives: ['fast', 'erratic'], action: { kind: 'leap', chance: 0.4 } },
+  batStorm: { name: '雷コウモリ', family: 'swift', grade: 3, hp: 8, atk: 6, def: 2, evasion: 0.15, xp: 29, minDepth: 20, maxDepth: ANY, weight: 3, maxPerFloor: ANY, pack: [1, 2], passives: ['fast', 'erratic'], action: { kind: 'leap', chance: 0.5 } },
 
-  // 戦士: 素直に強い。装備を落とす率が高い系統
-  goblin: { name: 'ゴブリン', family: 'warrior', grade: 1, hp: 6, atk: 4, def: 1, evasion: 0, xp: 4, minDepth: 2, maxDepth: 10, weight: 4, maxPerFloor: ANY, pack: [1, 1], passives: [], action: { kind: 'doubleAttack', chance: 0.3 } },
-  goblinArmored: { name: '重装ゴブリン', family: 'warrior', grade: 2, hp: 17, atk: 7, def: 4, evasion: 0, xp: 14, minDepth: 11, maxDepth: 20, weight: 4, maxPerFloor: ANY, pack: [1, 1], passives: [], action: { kind: 'doubleAttack', chance: 0.4 } },
-  goblinKing: { name: 'ゴブリン王', family: 'warrior', grade: 3, hp: 29, atk: 11, def: 6, evasion: 0, xp: 40, minDepth: 21, maxDepth: ANY, weight: 4, maxPerFloor: ANY, pack: [1, 1], passives: [], action: { kind: 'doubleAttack', chance: 0.5 } },
+  // 戦士: 素直に強い。連撃率と装備の質が上がる
+  goblin: { name: 'ゴブリン', family: 'warrior', grade: 1, hp: 4, atk: 4, def: 2, evasion: 0, xp: 4, minDepth: 6, maxDepth: 10, weight: 4, maxPerFloor: ANY, pack: [1, 1], passives: [], action: { kind: 'doubleAttack', chance: 0.3 } },
+  goblinArmored: { name: '重装ゴブリン', family: 'warrior', grade: 2, hp: 7, atk: 6, def: 4, evasion: 0, xp: 16, minDepth: 14, maxDepth: 19, weight: 4, maxPerFloor: ANY, pack: [1, 1], passives: [], action: { kind: 'doubleAttack', chance: 0.4 } },
+  goblinKing: { name: 'ゴブリン王', family: 'warrior', grade: 3, hp: 17, atk: 8, def: 6, evasion: 0, xp: 46, minDepth: 23, maxDepth: ANY, weight: 4, maxPerFloor: ANY, pack: [1, 1], passives: [], action: { kind: 'doubleAttack', chance: 0.5 } },
+
+  // 重装: 高 HP、鈍足、再生。強打の発生率が上がる
+  troll: { name: 'トロル', family: 'heavy', grade: 1, hp: 13, atk: 8, def: 3, evasion: 0, xp: 13, minDepth: 8, maxDepth: 13, weight: 2, maxPerFloor: 3, pack: [1, 1], passives: ['regen', 'slow'], action: { kind: 'smash', chance: 0.25 } },
+  trollRock: { name: '岩トロル', family: 'heavy', grade: 2, hp: 18, atk: 7, def: 5, evasion: 0, xp: 44, minDepth: 16, maxDepth: 21, weight: 2, maxPerFloor: 3, pack: [1, 1], passives: ['regen', 'slow'], action: { kind: 'smash', chance: 0.35 } },
+  trollIron: { name: '鉄トロル', family: 'heavy', grade: 3, hp: 32, atk: 9, def: 7, evasion: 0, xp: 100, minDepth: 25, maxDepth: ANY, weight: 2, maxPerFloor: 3, pack: [1, 1], passives: ['regen', 'slow'], action: { kind: 'smash', chance: 0.45 } },
 
   // 変則: 通常の戦い方が通じない。分裂 → 壁抜け → 擬態と重なっていく
-  slime: { name: 'スライム', family: 'odd', grade: 1, hp: 8, atk: 3, def: 1, evasion: 0, xp: 3, minDepth: 3, maxDepth: 10, weight: 3, maxPerFloor: 2, pack: [1, 1], passives: ['split'] },
-  slimeSplit: { name: '幽体スライム', family: 'odd', grade: 2, hp: 18, atk: 6, def: 3, evasion: 0.05, xp: 8, minDepth: 11, maxDepth: 20, weight: 3, maxPerFloor: 2, pack: [1, 1], passives: ['split', 'phasing'] },
-  slimeMimic: { name: '擬態スライム', family: 'odd', grade: 3, hp: 30, atk: 10, def: 5, evasion: 0.05, xp: 22, minDepth: 21, maxDepth: ANY, weight: 3, maxPerFloor: 2, pack: [1, 1], passives: ['split', 'phasing', 'mimic'] },
-
-  // 重装: 高 HP、鈍足、再生。強打の発生率と再生量が上がっていく
-  troll: { name: 'トロル', family: 'heavy', grade: 1, hp: 18, atk: 8, def: 3, evasion: 0, xp: 16, minDepth: 6, maxDepth: 10, weight: 2, maxPerFloor: 2, pack: [1, 1], passives: ['regen', 'slow'], action: { kind: 'smash', chance: 0.25 } },
-  trollRock: { name: '岩トロル', family: 'heavy', grade: 2, hp: 24, atk: 10, def: 4, evasion: 0, xp: 34, minDepth: 11, maxDepth: 20, weight: 2, maxPerFloor: 2, pack: [1, 1], passives: ['regen', 'slow'], action: { kind: 'smash', chance: 0.35 } },
-  trollIron: { name: '鉄トロル', family: 'heavy', grade: 3, hp: 36, atk: 14, def: 6, evasion: 0, xp: 70, minDepth: 21, maxDepth: ANY, weight: 2, maxPerFloor: 2, pack: [1, 1], passives: ['regen', 'slow'], action: { kind: 'smash', chance: 0.45 } },
+  slime: { name: 'スライム', family: 'odd', grade: 1, hp: 3, atk: 4, def: 0, evasion: 0, xp: 5, minDepth: 1, maxDepth: 10, weight: 3, maxPerFloor: 3, pack: [1, 1], passives: ['split'] },
+  slimeSplit: { name: '幽体スライム', family: 'odd', grade: 2, hp: 6, atk: 3, def: 1, evasion: 0.05, xp: 11, minDepth: 11, maxDepth: 20, weight: 3, maxPerFloor: 3, pack: [1, 1], passives: ['split', 'phasing'] },
+  slimeMimic: { name: '擬態スライム', family: 'odd', grade: 3, hp: 10, atk: 4, def: 2, evasion: 0.05, xp: 30, minDepth: 21, maxDepth: ANY, weight: 3, maxPerFloor: 3, pack: [1, 1], passives: ['split', 'phasing', 'mimic'] },
 
   // ボス: 階を代表する 1 体
-  dragon: { name: 'ドラゴン', family: 'boss', grade: 0, hp: 30, atk: 12, def: 3, evasion: 0, xp: 40, bounty: 120, minDepth: 10, maxDepth: ANY, weight: 0, maxPerFloor: 1, pack: [1, 1], passives: [], action: { kind: 'breath', chance: 0.3 } },
+  dragon: { name: 'ドラゴン', family: 'boss', grade: 0, hp: 20, atk: 8, def: 4, evasion: 0, xp: 40, bounty: 120, minDepth: 10, maxDepth: ANY, weight: 0, maxPerFloor: 1, pack: [1, 1], passives: [], action: { kind: 'breath', chance: 0.3 } },
 
   // 長居への対策。通常の配置では出ず、フロア内のターン数で呼ばれる。
   // 勝てない強さだが、逃げ切れるように fast は付けない。
   // 経験値を 0 にしてあるので、倒せてしまっても成長が壊れない。
-  stalker: { name: '追う者', family: 'boss', grade: 0, hp: 160, atk: 12, def: 8, evasion: 0, xp: 0, bounty: 300, minDepth: 1, maxDepth: ANY, weight: 0, maxPerFloor: 1, pack: [1, 1], passives: [], action: { kind: 'smash', chance: 0.3 } },
+  stalker: { name: '追う者', family: 'boss', grade: 0, hp: 150, atk: 9, def: 10, evasion: 0, xp: 0, bounty: 300, minDepth: 1, maxDepth: ANY, weight: 0, maxPerFloor: 1, pack: [1, 1], passives: [], action: { kind: 'smash', chance: 0.3 } },
 };
 
 /** 長居への対策として呼ばれる敵 */
@@ -255,21 +270,42 @@ export function actorName(kind: ActorKind): string {
 export const PLAYER_BASE_ATK = 4;
 
 export function createPlayer(x: number, y: number): Actor {
-  return { id: 0, kind: 'player', x, y, hp: 20, maxHp: 20, atk: PLAYER_BASE_ATK, def: 0, evasion: 0 };
+  return { id: 0, kind: 'player', x, y, hp: 17, maxHp: 17, atk: PLAYER_BASE_ATK, def: 0, evasion: 0 };
 }
+
+/**
+ * 系統ごとの伸び方。
+ *
+ * 変則は全階に出る特殊枠なので、数値の伸びを緩めてある。
+ * 通常の戦い方が通じないことが持ち味で、数値で圧してくる系統ではない。
+ * 他と同じ伸びにすると、全階に出るぶんだけ一方的に強くなる。
+ */
+const GROWTH: Record<MonsterFamily, { hp: number; atk: number }> = {
+  swarm: { hp: 0.75, atk: 1 / 3 },
+  swift: { hp: 0.75, atk: 1 / 3 },
+  warrior: { hp: 0.75, atk: 1 / 3 },
+  heavy: { hp: 0.75, atk: 1 / 3 },
+  odd: { hp: 0.6, atk: 0.28 },
+  boss: { hp: 0.75, atk: 1 / 3 },
+};
 
 /**
  * 階の深さに応じて強くした個体を作る。
  *
- * HP の伸びは深さの 3/4 にしてある。もとは等倍だったが、これは
- * レベルが階に対して 1.7 ずつ伸びていた頃の値である。
- * 経験値ゲートでレベルを抑えたぶん、敵の伸びも緩めないと深層が成立しない。
- * 等倍のままだと 200 run の B20 到達率が 20% から 10% に落ちる。
+ * 補正は minDepth からの差ではなく、**絶対の階数**で掛ける。
+ * 差で掛けると、帯に入った直後の敵が基礎値のまま出て、同じ階の他の敵より弱くなる。
+ * 系統ごとに帯をずらしてあるので、この落ち込みが階ごとに現れてしまう。
+ *
+ * この形だと基礎値は「その系統・グレードの持ち味」を表し、階の水準は補正が受け持つ。
+ * 帯をずらしても数値が飛ばないので、出現階を調整しやすい。
+ *
+ * HP の伸びを深さの 3/4 にしてあるのは、経験値ゲートでプレイヤーのレベルを
+ * 抑えたぶん、敵の伸びも緩めないと深層が成立しないためである。
  */
 export function createMonster(kind: MonsterKind, depth: number, x: number, y: number, id: number): Actor {
   const m = MONSTERS[kind];
-  const bonus = Math.max(0, depth - m.minDepth);
-  const hp = m.hp + Math.floor((bonus * 3) / 4);
+  const g = GROWTH[m.family];
+  const hp = m.hp + Math.floor(depth * g.hp);
   return {
     id,
     kind,
@@ -277,8 +313,12 @@ export function createMonster(kind: MonsterKind, depth: number, x: number, y: nu
     y,
     hp,
     maxHp: hp,
-    atk: m.atk + Math.floor(bonus / 3),
-    def: m.def + Math.floor(bonus / 4),
+    atk: m.atk + Math.floor(depth * g.atk),
+    // 防御力は深さで伸ばさない。系統ごとの硬さを表す値として固定する。
+    // 伸ばすと、プレイヤーの攻撃力の伸び (階/3) をほぼ打ち消してしまい、
+    // 与ダメージが深さに対して横ばいになる。敵の HP は伸びるので、
+    // 深いほど 1 体に要する手数だけが増えて壁になる。
+    def: m.def,
     evasion: m.evasion,
   };
 }
@@ -287,7 +327,7 @@ export function createMonster(kind: MonsterKind, depth: number, x: number, y: nu
  * 階ごとの配置。人数の予算を、出現条件を満たす敵から重みで選んで埋める。
  * 群れは 1 回の抽選でまとめて置き、上限のある敵は数える。
  *
- * 予算は階の 3/4 で伸ばす。1 階の滞在ターンを短くするための削減であり、
+ * 予算は階の 3/5 で伸ばす。1 階の滞在ターンを短くするための削減であり、
  * 掃討にかかる手数がそのまま滞在時間になっていた。
  * 群れの pack は削らない。数で押す系統なので、頭数を削ると包囲が成立しなくなる。
  */
@@ -298,7 +338,7 @@ export function spawnMonsters(
   avoid: { x: number; y: number },
   nextId: () => number,
 ): Actor[] {
-  const budget = 3 + Math.floor((depth * 3) / 4) + rng.int(0, 1);
+  const budget = 3 + Math.floor((depth * 3) / 5) + rng.int(0, 1);
   const monsters: Actor[] = [];
   const counts: Partial<Record<MonsterKind, number>> = {};
 

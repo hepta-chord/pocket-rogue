@@ -1,5 +1,13 @@
 import { chooseStep, distanceField } from './ai';
 import {
+  ROOT_TURNS,
+  SUMMON_COUNT,
+  TRAP_NAMES,
+  spawnTraps,
+  type Trap,
+  type TrapKind,
+} from './traps';
+import {
   BOSS,
   MONSTERS,
   SLIME_CAP,
@@ -41,6 +49,7 @@ import {
 import {
   CONSUMABLES,
   DROP_CHANCE,
+  FAMILY_DROP_RATE,
   ITEM_NAMES,
   stackLimit,
   emptyInventory,
@@ -94,7 +103,7 @@ export type Action =
   | { type: 'cancel' };
 
 /** 残りターン数で切れる効果 */
-export type TimedEffect = 'haste' | 'slow' | 'poison';
+export type TimedEffect = 'haste' | 'slow' | 'poison' | 'root';
 
 /** 毒が 1 ターンに与えるダメージ */
 const POISON_DAMAGE = 1;
@@ -157,7 +166,7 @@ export interface StepResult {
   interrupt: boolean;
 }
 
-export const SAVE_VERSION = 15;
+export const SAVE_VERSION = 16;
 
 /**
  * 次のレベルまでに必要な経験値。
@@ -211,6 +220,8 @@ export interface GameState {
   items: Item[];
   /** 踏むと効果が出る床。踏んだら消える */
   floors: FloorTile[];
+  /** 見えない罠。踏むと発動して消える */
+  traps: Trap[];
   /** 残りターン数つきの効果。0 になったら切れる */
   effects: Partial<Record<TimedEffect, number>>;
   /** 今の階に入ってからのターン数。追加の湧きと追う者はこれを見る */
@@ -308,6 +319,7 @@ export function newGame(seed: string): GameState {
     monsters: [],
     items: [],
     floors: [],
+    traps: [],
     effects: {},
     floorTurn: 0,
     stalkerCalled: false,
@@ -355,6 +367,16 @@ export function step(state: GameState, action: Action): StepResult {
   if (action.type === 'confirm' || action.type === 'cancel') return none;
   if (action.type === 'cast' && !canCast(state, action.spell)) return none;
 
+  if (action.type === 'move' && state.effects.root) {
+    const target = monsterAt(state, p.x + action.dx, p.y + action.dy);
+    if (!target) {
+      pushLog(state, 'alert', '足を取られていて動けない。');
+      endTurn(state, rng, { enemies: true });
+      state.rngState = rng.state;
+      return { acted: true, interrupt: false };
+    }
+  }
+
   if (action.type === 'move') {
     const nx = p.x + action.dx;
     const ny = p.y + action.dy;
@@ -368,6 +390,8 @@ export function step(state: GameState, action: Action): StepResult {
       p.y = ny;
       entered = true;
       checkHouse(state);
+      // 罠を先に見る。落とし穴で階が変わると、以降の判定は新しい階のものになる
+      if (stepOnTrap(state, rng)) interrupt = true;
       if (stepOnFloor(state, rng)) interrupt = true;
       if (pickUp(state)) interrupt = true;
     } else {
@@ -575,6 +599,11 @@ function descend(state: GameState, rng: Rng): void {
   state.floors = stairsAt
     ? spawnFloors(rng, state.map, state.depth, start, stairsAt, [...state.monsters, ...state.items])
     : [];
+  state.traps = spawnTraps(rng, state.map, state.depth, start, [
+    ...state.items,
+    ...state.floors,
+    ...(stairsAt ? [stairsAt] : []),
+  ]);
   state.effects = {};
   state.floorTurn = 0;
   state.stalkerCalled = false;
@@ -700,6 +729,75 @@ function stairsPos(map: GameMap): { x: number; y: number } | null {
 }
 
 /** 足元のイベント床を踏む。踏んだら消える。何か起きたら true */
+/**
+ * 踏んだマスの罠を発動する。発動したら消える。
+ *
+ * どれも即死しない。HP とスタミナの半減は 1 を残し、落とし穴は階を降りるだけである。
+ * 取り返しがつかないのは腐食だけで、出やすさもそのぶん低くしてある。
+ */
+function stepOnTrap(state: GameState, rng: Rng): boolean {
+  const p = state.player;
+  const at = state.traps.findIndex((t) => t.x === p.x && t.y === p.y);
+  if (at < 0) return false;
+  const trap = state.traps[at];
+  state.traps.splice(at, 1);
+  pushLog(state, 'alert', `${TRAP_NAMES[trap.kind]}を踏んだ。`);
+  applyTrap(state, rng, trap.kind);
+  return true;
+}
+
+function applyTrap(state: GameState, rng: Rng, kind: TrapKind): void {
+  const p = state.player;
+  switch (kind) {
+    case 'corrode':
+      corrode(state);
+      return;
+
+    case 'summon': {
+      const n = rng.int(SUMMON_COUNT[0], SUMMON_COUNT[1]);
+      let born = 0;
+      for (let i = 0; i < n; i++) {
+        const m = spawnOne(rng, state.map, state.depth, state.monsters, () => state.nextId++, (x, y) =>
+          Math.max(Math.abs(x - p.x), Math.abs(y - p.y)) >= 2,
+        );
+        if (!m) break;
+        m.spawned = true;
+        state.monsters.push(m);
+        born++;
+      }
+      pushLog(state, 'enemy', born > 0 ? `${born} 体が湧き出した。` : '何も起きなかった。');
+      return;
+    }
+
+    case 'root':
+      // 罠を踏んだこのターンの終わりに 1 つ減るので、その分を足しておく。
+      // 足さないとログの数字より 1 ターン短くなる
+      state.effects.root = Math.max(state.effects.root ?? 0, ROOT_TURNS + 1);
+      pushLog(state, 'alert', `足を取られた。${ROOT_TURNS} ターン動けない。`);
+      return;
+
+    case 'halveHp': {
+      const lost = Math.floor(p.hp / 2);
+      p.hp -= lost;
+      notifyDamage({ to: 'player', depth: state.depth, from: 'floor', roll: lost, dealt: lost });
+      pushLog(state, 'alert', `力が抜けた。HP が ${lost} 減った。`);
+      return;
+    }
+
+    case 'halveStamina': {
+      const lost = Math.floor(state.stamina / 2);
+      state.stamina -= lost;
+      pushLog(state, 'alert', `どっと疲れた。スタミナが ${lost} 減った。`);
+      return;
+    }
+
+    case 'pit':
+      pushLog(state, 'alert', '床が抜けた。下の階へ落ちる。');
+      descend(state, rng);
+      return;
+  }
+}
+
 function stepOnFloor(state: GameState, rng: Rng): boolean {
   const p = state.player;
   const i = state.floors.findIndex((f) => f.x === p.x && f.y === p.y);
@@ -905,6 +1003,18 @@ function useItem(state: GameState, kind: ConsumableKind): void {
       pushLog(state, 'player', `スタミナ薬を飲んだ。スタミナが ${gain} 戻った。`);
       return;
     }
+    case 'map': {
+      // 罠は見えないので、地図が唯一の対抗手段になる
+      revealMap(state);
+      const hidden = state.traps.filter((t) => !t.found).length;
+      for (const t of state.traps) t.found = true;
+      pushLog(
+        state,
+        'player',
+        hidden > 0 ? `地図を広げた。地形と、隠れていた罠 ${hidden} 個が分かった。` : '地図を広げた。地形が分かった。',
+      );
+      return;
+    }
   }
 }
 
@@ -1105,10 +1215,11 @@ function defeatBoss(state: GameState, m: Actor): void {
  * 戦うか避けるかの判断に装備の期待値が乗る。
  */
 function dropEquip(state: GameState, rng: Rng, m: Actor): void {
-  // 分裂体は落とさない。割るたびに抽選が増えると、分裂を止める装備が分裂で稼げてしまう
+  // 分裂体は落とさない。割るたびに抽選が増えると、装備が分裂で稼げてしまう
   if (m.split) return;
   const family = MONSTERS[m.kind as MonsterKind].family;
-  if (!rng.chance(DROP_CHANCE * (m.spawned ? SPAWN_REWARD : 1))) return;
+  const rate = DROP_CHANCE * FAMILY_DROP_RATE[family] * (m.spawned ? SPAWN_REWARD : 1);
+  if (!rng.chance(rate)) return;
   if (state.items.some((it) => it.x === m.x && it.y === m.y)) return;
   const id = pickDropEquip(rng, family);
   if (!id) return;
@@ -1522,6 +1633,7 @@ function stairsDirection(state: GameState): string {
 }
 
 const EFFECT_END: Record<TimedEffect, string> = {
+  root: '足が自由になった。',
   haste: '体の軽さが消えた。',
   slow: '足の重さが取れた。',
   poison: '毒が抜けた。',
@@ -1533,7 +1645,9 @@ function tickEffects(state: GameState): void {
     state.player.hp -= POISON_DAMAGE;
     notifyDamage({ to: 'player', depth: state.depth, from: 'poison', roll: POISON_DAMAGE, dealt: POISON_DAMAGE });
   }
-  for (const key of ['haste', 'slow', 'poison'] as TimedEffect[]) {
+  // 一覧をここに直書きすると、効果を足したときに減らし忘れる。
+  // 終了メッセージの表から引くことで、片方だけ足すことができないようにする
+  for (const key of Object.keys(EFFECT_END) as TimedEffect[]) {
     const left = state.effects[key];
     if (left === undefined) continue;
     if (left <= 1) {
@@ -1648,6 +1762,14 @@ export function toViewModel(state: GameState): ViewModel {
     const i = idx(map, f.x, f.y);
     if (state.explored[i] !== 1) continue;
     cells[i] = { kind: FLOOR_CELL[f.kind], vis: cells[i].vis };
+  }
+
+  // 見つかった罠だけ重ねる。見つかっていないものは地形と区別が付かない
+  for (const t of state.traps) {
+    if (!t.found) continue;
+    const i = idx(map, t.x, t.y);
+    if (state.explored[i] !== 1) continue;
+    cells[i] = { kind: 'trap', vis: cells[i].vis };
   }
 
   // アイテムは一度見た場所のものを覚えておく (見えていなくても表示する)
