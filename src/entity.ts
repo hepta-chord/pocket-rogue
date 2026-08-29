@@ -192,8 +192,9 @@ const ANY = 99;
  * 深さ補正は minDepth 起点なので、帯の頭では基礎値がそのまま出る。
  */
 export const MONSTERS: Record<MonsterKind, MonsterDef> = {
-  // 群れ: 1 体は弱く数で押す。囲まれると危ないが、1 体ずつなら軽い
-  rat: { name: 'ネズミ', family: 'swarm', grade: 1, hp: 2, atk: 4, def: 0, evasion: 0, xp: 2, minDepth: 1, maxDepth: 5, weight: 5, maxPerFloor: ANY, pack: [3, 4], passives: [] },
+  // 群れ: 1 体は弱く数で押す。1 体ずつなら軽いが、囲まれると 1 ターンで大きく削られる。
+  // B1 から死にうる水準にしてある。序盤が安全だと、判断を覚えないまま深層まで来てしまう
+  rat: { name: 'ネズミ', family: 'swarm', grade: 1, hp: 2, atk: 5, def: 0, evasion: 0, xp: 2, minDepth: 1, maxDepth: 5, weight: 5, maxPerFloor: ANY, pack: [4, 6], passives: [] },
   ratPoison: { name: '毒ネズミ', family: 'swarm', grade: 2, hp: 5, atk: 4, def: 1, evasion: 0, xp: 6, minDepth: 9, maxDepth: 14, weight: 5, maxPerFloor: ANY, pack: [3, 4], passives: [], action: { kind: 'poison', chance: 0.25 } },
   ratRot: { name: '腐れネズミ', family: 'swarm', grade: 3, hp: 7, atk: 5, def: 2, evasion: 0, xp: 20, minDepth: 18, maxDepth: ANY, weight: 5, maxPerFloor: ANY, pack: [3, 5], passives: [], action: { kind: 'corrodeHit', chance: 0.2 } },
 
@@ -213,7 +214,7 @@ export const MONSTERS: Record<MonsterKind, MonsterDef> = {
   trollIron: { name: '鉄トロル', family: 'heavy', grade: 3, hp: 32, atk: 9, def: 7, evasion: 0, xp: 100, minDepth: 25, maxDepth: ANY, weight: 2, maxPerFloor: 3, pack: [1, 1], passives: ['regen', 'slow'], action: { kind: 'smash', chance: 0.45 } },
 
   // 変則: 通常の戦い方が通じない。分裂 → 壁抜け → 擬態と重なっていく
-  slime: { name: 'スライム', family: 'odd', grade: 1, hp: 3, atk: 2, def: 0, evasion: 0, xp: 5, minDepth: 1, maxDepth: 10, weight: 3, maxPerFloor: 3, pack: [1, 1], passives: ['split'] },
+  slime: { name: 'スライム', family: 'odd', grade: 1, hp: 3, atk: 4, def: 0, evasion: 0, xp: 5, minDepth: 1, maxDepth: 10, weight: 3, maxPerFloor: 3, pack: [1, 1], passives: ['split'] },
   slimeSplit: { name: '幽体スライム', family: 'odd', grade: 2, hp: 6, atk: 3, def: 1, evasion: 0.05, xp: 11, minDepth: 11, maxDepth: 20, weight: 3, maxPerFloor: 3, pack: [1, 1], passives: ['split', 'phasing'] },
   slimeMimic: { name: '擬態スライム', family: 'odd', grade: 3, hp: 10, atk: 4, def: 2, evasion: 0.05, xp: 30, minDepth: 21, maxDepth: ANY, weight: 3, maxPerFloor: 3, pack: [1, 1], passives: ['split', 'phasing', 'mimic'] },
 
