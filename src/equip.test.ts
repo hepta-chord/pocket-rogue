@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { FAMILY_NAMES, type MonsterFamily } from './entity';
+import type { MonsterFamily } from './entity';
 import {
   ARMORS,
   ARMOR_IDS,
@@ -18,7 +18,7 @@ import {
   weaponHas,
   type EquipId,
 } from './equip';
-import { pickDropEquip, pickFloorEquip } from './items';
+import { pickDropEquip, pickFloorEquip, FAMILY_DROP_RATE } from './items';
 import { Rng, hashSeed } from './rng';
 
 const ALL: EquipId[] = [...WEAPON_IDS, ...ARMOR_IDS];
@@ -51,28 +51,38 @@ describe('装備の定義', () => {
     }
   });
 
-  it('系統ごとに特効の武器と防具が 1 つずつある', () => {
-    const families = (Object.keys(FAMILY_NAMES) as MonsterFamily[]).filter((f) => f !== 'boss');
-    for (const f of families) {
-      expect(WEAPON_IDS.filter((id) => WEAPONS[id].bane === f)).toHaveLength(1);
-      expect(ARMOR_IDS.filter((id) => ARMORS[id].bane === f)).toHaveLength(1);
+  it('床とドロップで品揃えが重ならない', () => {
+    const floor = ALL.filter((id) => !equipDef(id).dropOnly);
+    const drop = ALL.filter((id) => equipDef(id).dropOnly);
+    expect(floor.length).toBeGreaterThan(0);
+    expect(drop.length).toBeGreaterThan(0);
+    expect(floor.filter((id) => drop.includes(id))).toHaveLength(0);
+  });
+
+  it('床にも特殊効果を持つ装備がある', () => {
+    // 床が基礎装備だけになると、拾う楽しみが数値の大小だけになる
+    for (const slot of ['weapon', 'armor'] as const) {
+      const withTrait = ALL.filter((id) => {
+        const def = equipDef(id);
+        return def.slot === slot && !def.dropOnly && def.traits.length > 0;
+      });
+      expect(withTrait.length).toBeGreaterThan(0);
     }
   });
 
-  it('基礎装備が武器・防具それぞれ 3 種ある', () => {
-    expect(WEAPON_IDS.filter((id) => !WEAPONS[id].bane && !WEAPONS[id].dropOnly)).toHaveLength(3);
-    expect(ARMOR_IDS.filter((id) => !ARMORS[id].bane && !ARMORS[id].dropOnly)).toHaveLength(3);
-  });
-
-  it('ドロップ限定は系統を持たない', () => {
-    for (const id of ALL) {
-      const def = equipDef(id);
-      if (def.dropOnly) expect(def.bane).toBeNull();
+  it('床には効果を持たない素の装備が 3 種以上ある', () => {
+    // 数値だけで選ぶ装備が無いと、攻撃力と命中率のトレードオフが成立しない
+    for (const slot of ['weapon', 'armor'] as const) {
+      const base = ALL.filter((id) => {
+        const def = equipDef(id);
+        return def.slot === slot && !def.dropOnly && def.traits.length === 0 && def.effect === '';
+      });
+      expect(base.length).toBeGreaterThanOrEqual(3);
     }
   });
 
   it('単純な上位互換が無い (どの基礎装備も一方的に劣らない)', () => {
-    const base = WEAPON_IDS.filter((id) => !WEAPONS[id].bane && !WEAPONS[id].dropOnly);
+    const base = WEAPON_IDS.filter((id) => WEAPONS[id].traits.length === 0 && !WEAPONS[id].dropOnly);
     for (const a of base) {
       for (const b of base) {
         if (a === b) continue;
@@ -130,14 +140,6 @@ describe('実効値', () => {
     }
   });
 
-  it('系統特効は効く相手が説明に出る', () => {
-    for (const id of ALL) {
-      const def = equipDef(id);
-      if (!def.bane) continue;
-      expect(equipDetail({ id, power: 3 }, def.slot)).toContain('に効く');
-    }
-  });
-
   it('説明に数値と命中・回避が必ず入る', () => {
     for (const id of ALL) {
       const def = equipDef(id);
@@ -169,17 +171,22 @@ describe('出現の選び方', () => {
     expect(seen.size).toBe(WEAPON_IDS.filter((id) => !WEAPONS[id].dropOnly).length);
   });
 
-  it('ドロップはその系統に効くものか、ドロップ限定の変わり種になる', () => {
+  it('ドロップはドロップ限定の品からしか出ない', () => {
     const rng = new Rng(hashSeed('DROP'));
     const families: MonsterFamily[] = ['swarm', 'swift', 'warrior', 'odd', 'heavy'];
     for (const f of families) {
       for (let i = 0; i < 200; i++) {
         const id = pickDropEquip(rng, f);
         expect(id).not.toBeNull();
-        const def = equipDef(id as EquipId);
-        expect(def.bane === f || def.dropOnly).toBe(true);
+        expect(equipDef(id as EquipId).dropOnly).toBe(true);
       }
     }
+  });
+
+  it('系統ごとのドロップ率は手強い相手ほど高い', () => {
+    expect(FAMILY_DROP_RATE.heavy).toBeGreaterThan(FAMILY_DROP_RATE.warrior);
+    expect(FAMILY_DROP_RATE.warrior).toBeGreaterThan(FAMILY_DROP_RATE.swift);
+    expect(FAMILY_DROP_RATE.swift).toBeGreaterThan(FAMILY_DROP_RATE.swarm);
   });
 
   it('系統を持たないボスでも何かは落とす', () => {

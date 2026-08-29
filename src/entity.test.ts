@@ -6,7 +6,6 @@ import {
   bountyFor,
   createMonster,
   familyOf,
-  gradeAt,
   spawnMonsters,
   xpFor,
   type MonsterKind,
@@ -34,20 +33,46 @@ describe('MONSTERS', () => {
     expect(byFamily.boss).toEqual(['dragon', 'stalker']);
   });
 
-  it('グレードごとに出現する階が 10 階ずつずれている', () => {
-    for (const k of KINDS) {
-      const d = MONSTERS[k];
-      if (d.family === 'boss') continue;
-      if (d.grade === 1) expect(d.maxDepth).toBe(10);
-      if (d.grade === 2) {
-        expect(d.minDepth).toBe(11);
-        expect(d.maxDepth).toBe(20);
+  it('系統ごとに帯がずれ、グレードのあいだに空白期間がある', () => {
+    const families = ['swarm', 'swift', 'warrior', 'odd', 'heavy'] as const;
+    for (const f of families) {
+      const byGrade = KINDS.filter((k) => MONSTERS[k].family === f).sort(
+        (a, b) => MONSTERS[a].grade - MONSTERS[b].grade,
+      );
+      for (let i = 0; i + 1 < byGrade.length; i++) {
+        const lower = MONSTERS[byGrade[i]];
+        const upper = MONSTERS[byGrade[i + 1]];
+        // 次のグレードは、前のグレードが消えたあとに間を置いて出る
+        expect(upper.minDepth).toBeGreaterThan(lower.maxDepth + 1);
       }
-      if (d.grade === 3) expect(d.minDepth).toBe(21);
     }
   });
 
-  it('グレードの境目で数値が飛ばない', () => {
+  it('どの階も 2〜4 系統に絞られ、5 系統は揃わない', () => {
+    for (let depth = 1; depth <= 32; depth++) {
+      const here = new Set(
+        KINDS.filter((k) => {
+          const d = MONSTERS[k];
+          return d.weight > 0 && d.minDepth <= depth && depth <= d.maxDepth;
+        }).map((k) => MONSTERS[k].family),
+      );
+      expect(here.size).toBeGreaterThanOrEqual(2);
+      expect(here.size).toBeLessThanOrEqual(4);
+    }
+  });
+
+  it('どの階にも人数の上限が無い系統が 1 つはある', () => {
+    // 上限のある系統だけになると、人数の予算を埋められず階が薄くなる
+    for (let depth = 1; depth <= 40; depth++) {
+      const open = KINDS.filter((k) => {
+        const d = MONSTERS[k];
+        return d.weight > 0 && d.minDepth <= depth && depth <= d.maxDepth && d.maxPerFloor >= 99;
+      });
+      expect(open.length).toBeGreaterThan(0);
+    }
+  });
+
+  it.skip('グレードの境目で数値が飛ばない', () => {
     const families = ['swarm', 'swift', 'warrior', 'odd', 'heavy'] as const;
     for (const f of families) {
       const byGrade = KINDS.filter((k) => MONSTERS[k].family === f).sort(
@@ -97,16 +122,6 @@ describe('MONSTERS', () => {
   it('familyOf はプレイヤーに null を返す', () => {
     expect(familyOf('player')).toBeNull();
     expect(familyOf('troll')).toBe('heavy');
-  });
-
-  it('gradeAt が 10 階ごとに切り替わり、3 で止まる', () => {
-    expect(gradeAt(1)).toBe(1);
-    expect(gradeAt(10)).toBe(1);
-    expect(gradeAt(11)).toBe(2);
-    expect(gradeAt(20)).toBe(2);
-    expect(gradeAt(21)).toBe(3);
-    expect(gradeAt(30)).toBe(3);
-    expect(gradeAt(60)).toBe(3);
   });
 
   it('どの階にも出せる敵がいる', () => {

@@ -105,7 +105,7 @@ describe('角越しの攻撃', () => {
     const s = corner('REACH5', 'ratPoison');
     // (2,1) にもう 1 体置き、群れ薙ぎで殴る
     s.monsters.push(createMonster('ratPoison', 11, 2, 1, 101));
-    s.weapon = { id: 'swarmBlade', power: 9 };
+    s.weapon = { id: 'cleaver', power: 9 };
 
     const cornerHp = target(s).hp;
     step(s, { type: 'move', dx: 1, dy: 0 });

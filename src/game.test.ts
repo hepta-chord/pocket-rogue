@@ -402,7 +402,7 @@ describe('スタミナ', () => {
   });
 
   it('群れよけの盾を着ていると被弾でスタミナが減らない', () => {
-    const withGuard = (id: 'swarmGuard' | 'chain'): number => {
+    const withGuard = (id: 'staminaGuard' | 'chain'): number => {
       const s = newGame('ST8');
       s.armor = { id, power: 1 };
       const spot = neighborOf(s, s.player);
@@ -420,7 +420,7 @@ describe('スタミナ', () => {
       return before - s.stamina;
     };
     // 時間による減りは同じなので、差が出るのは被弾ぶんだけ
-    expect(withGuard('swarmGuard')).toBeLessThan(withGuard('chain'));
+    expect(withGuard('staminaGuard')).toBeLessThan(withGuard('chain'));
   });
 
   it('スタミナ薬で戻り、最大値を超えない', () => {

@@ -41,6 +41,7 @@ import {
 import {
   CONSUMABLES,
   DROP_CHANCE,
+  FAMILY_DROP_RATE,
   ITEM_NAMES,
   stackLimit,
   emptyInventory,
@@ -1105,10 +1106,11 @@ function defeatBoss(state: GameState, m: Actor): void {
  * 戦うか避けるかの判断に装備の期待値が乗る。
  */
 function dropEquip(state: GameState, rng: Rng, m: Actor): void {
-  // 分裂体は落とさない。割るたびに抽選が増えると、分裂を止める装備が分裂で稼げてしまう
+  // 分裂体は落とさない。割るたびに抽選が増えると、装備が分裂で稼げてしまう
   if (m.split) return;
   const family = MONSTERS[m.kind as MonsterKind].family;
-  if (!rng.chance(DROP_CHANCE * (m.spawned ? SPAWN_REWARD : 1))) return;
+  const rate = DROP_CHANCE * FAMILY_DROP_RATE[family] * (m.spawned ? SPAWN_REWARD : 1);
+  if (!rng.chance(rate)) return;
   if (state.items.some((it) => it.x === m.x && it.y === m.y)) return;
   const id = pickDropEquip(rng, family);
   if (!id) return;
