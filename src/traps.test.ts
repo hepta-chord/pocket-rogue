@@ -95,6 +95,42 @@ describe('罠', () => {
     s.traps[0].found = true;
     expect(toViewModel(s).cells[i].kind).toBe('trap');
   });
+
+  describe('腐食の罠', () => {
+    it('装備の強さが 1 下がる。深いほうから減る', () => {
+      const s = withTrap('CO1', 'corrode');
+      s.weapon = { id: 'sword', power: 5 };
+      s.armor = { id: 'chain', power: 2 };
+      stepRight(s);
+      expect(s.weapon?.power).toBe(4);
+      expect(s.armor?.power).toBe(2);
+    });
+
+    it('護符を着ていると防げる', () => {
+      const s = withTrap('CO2', 'corrode');
+      s.weapon = { id: 'sword', power: 5 };
+      s.armor = { id: 'wardCharm', power: 3 };
+      stepRight(s);
+      expect(s.weapon?.power).toBe(5);
+      expect(s.armor?.power).toBe(3);
+    });
+
+    it('強さ 0 の装備はそれ以上腐食しない', () => {
+      const s = withTrap('CO3', 'corrode');
+      s.weapon = { id: 'sword', power: 0 };
+      s.armor = null;
+      stepRight(s);
+      expect(s.weapon?.power).toBe(0);
+    });
+
+    it('腐食すると床の「断った」印が外れる', () => {
+      const s = withTrap('CO4', 'corrode');
+      s.weapon = { id: 'sword', power: 5 };
+      s.items = [{ kind: 'weapon', power: 4, equip: 'axe', x: 1, y: 1, declined: true }];
+      stepRight(s);
+      expect(s.items[0].declined).toBeUndefined();
+    });
+  });
 });
 
 describe('地図', () => {
@@ -107,6 +143,24 @@ describe('地図', () => {
     expect(s.traps[0].found).toBe(true);
     expect(s.explored.some((v) => v === 1)).toBe(true);
     expect(s.inventory.map).toBe(0);
+  });
+
+  it('スタミナを消費する', () => {
+    const s = withTrap('MAP2', 'corrode');
+    s.inventory.map = 1;
+    const before = s.stamina;
+    step(s, { type: 'use', item: 'map' });
+    expect(s.stamina).toBeLessThan(before);
+  });
+
+  it('スタミナが足りないと使えない', () => {
+    const s = withTrap('MAP3', 'corrode');
+    s.inventory.map = 1;
+    s.stamina = 1;
+    const r = step(s, { type: 'use', item: 'map' });
+    expect(r.acted).toBe(false);
+    expect(s.inventory.map).toBe(1);
+    expect(s.traps[0].found).toBe(false);
   });
 });
 

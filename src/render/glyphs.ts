@@ -16,11 +16,8 @@ export const CELL_GLYPHS: Record<CellKind, Glyph> = {
   stairs: { ch: '>', fg: '#ffd166' },
   stairsUp: { ch: '<', fg: '#8fe3ff' },
   unknown: { ch: ' ', fg: '#000000' },
-  // イベント床。色で効果の大きさと危なさが読めるようにする
-  floorGreen: { ch: '~', fg: '#7fd17f' },
-  floorYellow: { ch: '~', fg: '#ffd166' },
-  floorRed: { ch: '~', fg: '#ff6b6b' },
-  floorBlue: { ch: '~', fg: '#7fc4ff' },
+  // 休憩床。HP とスタミナを立て直せる
+  floorRest: { ch: '~', fg: '#7fc4ff' },
   // 見つかった罠。踏むまでは地形と区別が付かない
   trap: { ch: '^', fg: '#ff9f43' },
 };

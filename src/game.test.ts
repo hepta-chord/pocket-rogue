@@ -1,10 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { createMonster } from './entity';
-import type { FloorEffect } from './floors';
 import {
   SPELLS,
   SPAWN_INTERVAL,
-  applyFloorEffect,
   canCast,
   STALKER_TURN,
   STALKER_WARN,
@@ -481,6 +479,39 @@ describe('魔法', () => {
     // スタミナが満タンなら魔法は押せる
     expect(vm.slots[CONSUMABLES.length].enabled).toBe(true);
   });
+
+  it('単体では基礎威力のまま、複数を巻き込むと威力が上がる', () => {
+    // 単体
+    const solo = newGame('SP5');
+    const soloSpot = neighborOf(solo, solo.player);
+    if (!soloSpot) return;
+    const soloTarget = solo.monsters[0];
+    solo.monsters = [soloTarget];
+    soloTarget.x = soloSpot.x;
+    soloTarget.y = soloSpot.y;
+    soloTarget.hp = 9999;
+    const soloBefore = soloTarget.hp;
+    step(solo, { type: 'cast', spell: 'thunder' });
+    const soloDmg = soloBefore - soloTarget.hp;
+
+    // 同じ深さで、2 体を巻き込む
+    const group = newGame('SP5');
+    const spotA = neighborOf(group, group.player);
+    if (!spotA) return;
+    const targets = group.monsters.slice(0, 2);
+    if (targets.length < 2) return;
+    for (const m of targets) {
+      m.x = spotA.x;
+      m.y = spotA.y;
+      m.hp = 9999;
+    }
+    group.monsters = targets;
+    const groupBefore = targets[0].hp;
+    step(group, { type: 'cast', spell: 'thunder' });
+    const groupDmg = groupBefore - targets[0].hp;
+
+    expect(groupDmg).toBeGreaterThan(soloDmg);
+  });
 });
 
 describe('消耗品の所持上限', () => {
@@ -501,111 +532,41 @@ describe('消耗品の所持上限', () => {
   });
 });
 
-describe('イベント床', () => {
-  /** プレイヤーの隣に床を置き、踏ませる */
-  function stepOnto(s: GameState, kind: 'green' | 'yellow' | 'red' | 'blue'): boolean {
-    const spot = neighborOf(s, s.player);
-    if (!spot) return false;
-    s.monsters = [];
-    s.items = [];
-    s.floors = [{ kind, x: spot.x, y: spot.y }];
-    step(s, { type: 'move', dx: spot.x - s.player.x, dy: spot.y - s.player.y });
-    return true;
-  }
-
-  it('各階に青い床が置かれる', () => {
+describe('休憩床', () => {
+  it('B1 は REST_SPAN の倍数ではないので置かれない', () => {
+    // 配置そのものの網羅は floors.test.ts の spawnFloors 側で確かめる。
+    // ここでは descend が実際の depth を渡していることだけを見る
     const s = newGame('FL1');
-    expect(s.floors.filter((f) => f.kind === 'blue')).toHaveLength(1);
-  });
-
-  it('踏むと消える', () => {
-    const s = newGame('FL2');
-    if (!stepOnto(s, 'green')) return;
     expect(s.floors).toHaveLength(0);
   });
 
-  it('青い床は HP を全回復し、スタミナも戻す', () => {
+  it('HP を全回復し、スタミナも戻す', () => {
     const s = newGame('FL3');
+    const spot = neighborOf(s, s.player);
+    if (!spot) return;
+    s.monsters = [];
+    s.items = [];
+    s.floors = [{ x: spot.x, y: spot.y }];
     s.player.maxHp = 40;
     s.player.hp = 5;
     s.stamina = 10;
-    if (!stepOnto(s, 'blue')) return;
+    step(s, { type: 'move', dx: spot.x - s.player.x, dy: spot.y - s.player.y });
+    expect(s.floors).toHaveLength(0);
     expect(s.player.hp).toBe(40);
     expect(s.stamina).toBeGreaterThan(10);
   });
 
   it('ViewModel にセルの種別が出る', () => {
     const s = newGame('FL4');
-    const blue = s.floors.find((f) => f.kind === 'blue');
-    if (!blue) return;
-    s.explored[blue.y * s.map.width + blue.x] = 1;
+    const spot = neighborOf(s, s.player);
+    if (!spot) return;
+    s.floors = [{ x: spot.x, y: spot.y }];
+    s.explored[spot.y * s.map.width + spot.x] = 1;
     const vm = toViewModel(s);
-    expect(vm.cells[blue.y * vm.width + blue.x].kind).toBe('floorBlue');
+    expect(vm.cells[spot.y * vm.width + spot.x].kind).toBe('floorRest');
   });
 });
 
-describe('腐食', () => {
-  it('装備の強さが 1 下がる', () => {
-    const s = newGame('CO1');
-    s.weapon = { id: 'sword', power: 5 };
-    s.armor = { id: 'chain', power: 2 };
-    applyFloorEffectForTest(s, { kind: 'corrode' });
-    // 深いほうから減る
-    expect(s.weapon?.power).toBe(4);
-    expect(s.armor?.power).toBe(2);
-  });
-
-  it('護符を着ていると防げる', () => {
-    const s = newGame('CO2');
-    s.weapon = { id: 'sword', power: 5 };
-    s.armor = { id: 'wardCharm', power: 3 };
-    applyFloorEffectForTest(s, { kind: 'corrode' });
-    expect(s.weapon?.power).toBe(5);
-    expect(s.armor?.power).toBe(3);
-  });
-
-  it('強さ 0 の装備はそれ以上腐食しない', () => {
-    const s = newGame('CO3');
-    s.weapon = { id: 'sword', power: 0 };
-    s.armor = null;
-    applyFloorEffectForTest(s, { kind: 'corrode' });
-    expect(s.weapon?.power).toBe(0);
-  });
-
-  it('腐食すると床の「断った」印が外れる', () => {
-    const s = newGame('CO4');
-    s.weapon = { id: 'sword', power: 5 };
-    s.items = [{ kind: 'weapon', power: 4, equip: 'axe', x: 1, y: 1, declined: true }];
-    applyFloorEffectForTest(s, { kind: 'corrode' });
-    expect(s.items[0].declined).toBeUndefined();
-  });
-});
-
-describe('一時的な効果', () => {
-  it('残りターン数が減り、切れる', () => {
-    const s = newGame('EF1');
-    s.monsters = [];
-    applyFloorEffectForTest(s, { kind: 'haste', turns: 3 });
-    expect(s.effects.haste).toBe(3);
-    step(s, WAIT);
-    expect(s.effects.haste).toBe(2);
-    step(s, WAIT);
-    step(s, WAIT);
-    expect(s.effects.haste).toBeUndefined();
-  });
-
-  it('スタミナの最大値が増減し、下限を割らない', () => {
-    const s = newGame('EF2');
-    const before = s.staminaMax;
-    applyFloorEffectForTest(s, { kind: 'boostStaminaMax', amount: 10 });
-    expect(s.staminaMax).toBe(before + 10);
-
-    // 何度削っても 20 は残る
-    for (let i = 0; i < 20; i++) applyFloorEffectForTest(s, { kind: 'drainStaminaMax', amount: 15 });
-    expect(s.staminaMax).toBeGreaterThanOrEqual(20);
-    expect(s.stamina).toBeLessThanOrEqual(s.staminaMax);
-  });
-});
 
 describe('長居への対策', () => {
   /**
@@ -768,8 +729,7 @@ describe('毒', () => {
   it('重ね掛けに上限がある', () => {
     const s = newGame('PO2');
     s.monsters = [];
-    for (let i = 0; i < 10; i++) applyFloorEffect(s, { kind: 'haste', turns: 1 });
-    // 毒は床効果には無いので、直接積んで上限だけ確かめる
+    // 直接積んで、1 ターンで減ることだけ確かめる
     s.effects.poison = 999;
     step(s, WAIT);
     expect(s.effects.poison).toBeLessThan(999);
@@ -1042,14 +1002,6 @@ describe('toViewModel', () => {
     expect(bandAt(1)).toBe('critical');
   });
 });
-
-/**
- * 効果を 1 つだけ確実に起こす。
- * rollEffect は乱数なので、効果そのものを検証したいときはこちらを使う。
- */
-function applyFloorEffectForTest(s: GameState, effect: FloorEffect): void {
-  applyFloorEffect(s, effect);
-}
 
 /** プレイヤーの隣で歩けるマスを 1 つ返す */
 function neighborOf(s: GameState, p: { x: number; y: number }): { x: number; y: number } | null {

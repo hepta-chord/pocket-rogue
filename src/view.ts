@@ -13,11 +13,8 @@ export type CellKind =
   | 'stairs'
   | 'stairsUp'
   | 'unknown'
-  /** イベント床。色ごとに効果の大きさとマイナスの出る率が違う */
-  | 'floorGreen'
-  | 'floorYellow'
-  | 'floorRed'
-  | 'floorBlue'
+  /** 休憩床。HP とスタミナを立て直せる */
+  | 'floorRest'
   /** 見つかった罠。踏むまで見えない */
   | 'trap';
 export type Visibility = 'visible' | 'remembered' | 'unknown';
