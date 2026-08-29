@@ -72,6 +72,21 @@ export function isWalkable(map: GameMap, x: number, y: number): boolean {
 }
 
 /**
+ * (x, y) から (dx, dy) の隣へ攻撃が届くか。
+ *
+ * 斜めのときは、隣が片方でも壁なら届かない。壁の角越しには殴れないということである。
+ * これを入れないと通路の入口が防衛線にならず、1 対 1 を作るために通路の奥へ
+ * 2 歩下がる必要が出る。
+ *
+ * 行き先が歩けるかどうかは見ない。壁の中にいる敵 (壁抜け) には届いてよい。
+ * 届かないことにすると、壁に潜ったまま一方的に殴られる。
+ */
+export function canReach(map: GameMap, x: number, y: number, dx: number, dy: number): boolean {
+  if (dx === 0 || dy === 0) return true;
+  return isWalkable(map, x + dx, y) && isWalkable(map, x, y + dy);
+}
+
+/**
  * (x, y) から (dx, dy) へ 1 マス動けるか。
  *
  * 斜めのときは、行き先が床でも**隣が片方でも壁なら通さない**。
@@ -83,8 +98,7 @@ export function isWalkable(map: GameMap, x: number, y: number): boolean {
  */
 export function canStep(map: GameMap, x: number, y: number, dx: number, dy: number): boolean {
   if (!isWalkable(map, x + dx, y + dy)) return false;
-  if (dx === 0 || dy === 0) return true;
-  return isWalkable(map, x + dx, y) && isWalkable(map, x, y + dy);
+  return canReach(map, x, y, dx, dy);
 }
 
 /**
@@ -140,7 +154,7 @@ export function randomPointInRoom(rng: Rng, r: Room): { x: number; y: number } {
   return { x: rng.int(r.x, r.x + r.w - 1), y: rng.int(r.y, r.y + r.h - 1) };
 }
 
-const MAX_ROOMS = 9;
+const MAX_ROOMS = 6;
 const ROOM_ATTEMPTS = 200;
 
 /**
@@ -233,6 +247,8 @@ function generateMaze(rng: Rng, width: number, height: number): GameMap {
     stack.push({ x: pick.nx, y: pick.ny });
   }
 
+  braid(map, rng, BRAID_RATE);
+
   map.start = start;
   // 階段は開始地点から最も遠い床に置く
   let best = start;
@@ -249,6 +265,65 @@ function generateMaze(rng: Rng, width: number, height: number): GameMap {
   }
   map.tiles[idx(map, best.x, best.y)] = Tile.StairsDown;
   return map;
+}
+
+/**
+ * 行き止まりを潰す割合。
+ *
+ * 完全迷路は循環が無いので、枝を間違えるたびに引き返す必要がある。
+ * 40 x 30 で測ると階段まで 214 歩あり、部屋 + 通路 (33 歩) の 6.5 倍だった。
+ * 行き止まりも 29 個ある。
+ *
+ * 輪を作ると階段までの歩数が半分以下になる。盤面を縮めるより効きが大きく、
+ * 他の作りと盤面サイズを共通に保てる。
+ * 0.8 なら行き止まりが数個残るので、迷路らしさは保てる。
+ */
+const BRAID_RATE = 0.8;
+
+/**
+ * 行き止まりの一部を潰して輪を作る。
+ * 2 マス先が床で、間が壁になっている向きを 1 つ選んで掘る。
+ */
+function braid(map: GameMap, rng: Rng, rate: number): void {
+  const { width, height } = map;
+  const ends: { x: number; y: number }[] = [];
+  for (let y = 1; y < height - 1; y++) {
+    for (let x = 1; x < width - 1; x++) {
+      if (!isWalkable(map, x, y)) continue;
+      let n = 0;
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          if (dx === 0 && dy === 0) continue;
+          if (canStep(map, x, y, dx, dy)) n++;
+        }
+      }
+      if (n <= 1) ends.push({ x, y });
+    }
+  }
+
+  for (const { x, y } of ends) {
+    if (!rng.chance(rate)) continue;
+    const opts = [
+      [0, -2],
+      [0, 2],
+      [-2, 0],
+      [2, 0],
+    ].filter(([dx, dy]) => {
+      const nx = x + dx;
+      const ny = y + dy;
+      return (
+        nx > 0 &&
+        ny > 0 &&
+        nx < width - 1 &&
+        ny < height - 1 &&
+        isWalkable(map, nx, ny) &&
+        !isWalkable(map, x + dx / 2, y + dy / 2)
+      );
+    });
+    if (opts.length === 0) continue;
+    const [dx, dy] = rng.pick(opts);
+    map.tiles[idx(map, x + dx / 2, y + dy / 2)] = Tile.Floor;
+  }
 }
 
 function tryGenerate(rng: Rng, width: number, height: number): GameMap {

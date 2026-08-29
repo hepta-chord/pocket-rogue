@@ -41,6 +41,8 @@ export interface Actor {
   revealed?: boolean;
   /** フロア生成後に湧いた個体。経験値とドロップを下げる */
   spawned?: boolean;
+  /** 分裂で生まれた個体。ドロップせず、経験値とスコアが下がる */
+  split?: boolean;
 }
 
 /**
@@ -52,8 +54,9 @@ export interface Actor {
  * - phasing: 壁の中を移動できる
  * - split: 近接攻撃を受けて生き残ると HP を半分にして 2 匹に割れる
  * - mimic: 落ちている武器に化けている。隣に来るか殴られるまで動かず、武器として見える
+ * - reach: 壁の角越しに攻撃が届く。通常の敵は角を回り込めない
  */
-export type Passive = 'fast' | 'slow' | 'regen' | 'erratic' | 'phasing' | 'split' | 'mimic';
+export type Passive = 'fast' | 'slow' | 'regen' | 'erratic' | 'phasing' | 'split' | 'mimic' | 'reach';
 
 /**
  * アクション: 条件が揃ったとき確率で使う技。使わなかったら通常行動。
@@ -217,6 +220,18 @@ export const BOSS: MonsterKind = 'dragon';
 
 export const SLIME_CAP = 4;
 
+/**
+ * 分裂で生まれた個体の報酬倍率。
+ *
+ * 分裂は親が HP を半分渡す形なので、倒すのに必要な総ダメージは変わらない。
+ * 労力が同じまま撃破数だけが増えるため、倍率が高いと稼ぎ場になる。
+ *
+ * 上限 4 のとき子は 3 体なので、合計は 1 + 3 × この値になる。
+ * 0.2 なら 1.6 倍で、抽選 1 回あたりの基礎経験値が
+ * 戦士・俊敏のすぐ下に収まる (グレード 1 で 4.8 対 4.0 と 3.0)。
+ */
+export const SPLIT_REWARD = 0.2;
+
 export function monsterDef(kind: ActorKind): MonsterDef | null {
   return kind === 'player' ? null : MONSTERS[kind];
 }
@@ -243,11 +258,18 @@ export function createPlayer(x: number, y: number): Actor {
   return { id: 0, kind: 'player', x, y, hp: 20, maxHp: 20, atk: PLAYER_BASE_ATK, def: 0, evasion: 0 };
 }
 
-/** 階の深さに応じて強くした個体を作る */
+/**
+ * 階の深さに応じて強くした個体を作る。
+ *
+ * HP の伸びは深さの 3/4 にしてある。もとは等倍だったが、これは
+ * レベルが階に対して 1.7 ずつ伸びていた頃の値である。
+ * 経験値ゲートでレベルを抑えたぶん、敵の伸びも緩めないと深層が成立しない。
+ * 等倍のままだと 200 run の B20 到達率が 20% から 10% に落ちる。
+ */
 export function createMonster(kind: MonsterKind, depth: number, x: number, y: number, id: number): Actor {
   const m = MONSTERS[kind];
   const bonus = Math.max(0, depth - m.minDepth);
-  const hp = m.hp + bonus;
+  const hp = m.hp + Math.floor((bonus * 3) / 4);
   return {
     id,
     kind,
@@ -262,8 +284,12 @@ export function createMonster(kind: MonsterKind, depth: number, x: number, y: nu
 }
 
 /**
- * 階ごとの配置。人数の予算 (3 + 階 + 0〜2) を、出現条件を満たす敵から重みで選んで埋める。
+ * 階ごとの配置。人数の予算を、出現条件を満たす敵から重みで選んで埋める。
  * 群れは 1 回の抽選でまとめて置き、上限のある敵は数える。
+ *
+ * 予算は階の 3/4 で伸ばす。1 階の滞在ターンを短くするための削減であり、
+ * 掃討にかかる手数がそのまま滞在時間になっていた。
+ * 群れの pack は削らない。数で押す系統なので、頭数を削ると包囲が成立しなくなる。
  */
 export function spawnMonsters(
   rng: Rng,
@@ -272,7 +298,7 @@ export function spawnMonsters(
   avoid: { x: number; y: number },
   nextId: () => number,
 ): Actor[] {
-  const budget = 3 + depth + rng.int(0, 2);
+  const budget = 3 + Math.floor((depth * 3) / 4) + rng.int(0, 1);
   const monsters: Actor[] = [];
   const counts: Partial<Record<MonsterKind, number>> = {};
 

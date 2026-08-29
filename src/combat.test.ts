@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   MONSTER_ROLL_FLOOR,
   PLAYER_ROLL_FLOOR,
+  DAMAGE_FLOOR_DIV,
   applyDefense,
   rollDamage,
   strike,
@@ -37,16 +38,17 @@ describe('applyDefense', () => {
     for (let roll = 1; roll <= 20; roll++) expect(applyDefense(roll, 0)).toBe(roll);
   });
 
-  it('防御が高くても出目の 1/4 は必ず通る', () => {
+  it('防御が高くても出目の一定割合は必ず通る', () => {
     for (let roll = 1; roll <= 40; roll++) {
-      expect(applyDefense(roll, 999)).toBe(Math.ceil(roll / 4));
+      expect(applyDefense(roll, 999)).toBe(Math.ceil(roll / DAMAGE_FLOOR_DIV));
     }
   });
 
   it('軽減率が 100% に張り付かない', () => {
-    // 防御が攻撃力に追いついても、軽減率は 75% で頭打ちになる
+    // 防御が攻撃力に追いついても、軽減率は頭打ちになる
+    const cap = 1 - 1 / DAMAGE_FLOOR_DIV;
     const roll = 8;
-    expect(1 - applyDefense(roll, 8) / roll).toBeLessThanOrEqual(0.75);
+    expect(1 - applyDefense(roll, 8) / roll).toBeLessThanOrEqual(cap);
   });
 
   it('防御を上げるほど通るダメージは減る (ただし単調で逆転しない)', () => {
@@ -95,11 +97,11 @@ describe('ボスの被弾', () => {
     expect(Math.min(...outcomes)).toBeGreaterThan(1);
   });
 
-  it('防具を厚くしても軽減率は 75% で頭打ちになる', () => {
+  it('防具を厚くしても軽減率は頭打ちになる', () => {
     const atk = MONSTERS.dragon.atk;
     const worst = applyDefense(atk, 99);
-    expect(worst).toBe(Math.ceil(atk / 4));
-    expect(1 - worst / atk).toBeLessThanOrEqual(0.75);
+    expect(worst).toBe(Math.ceil(atk / DAMAGE_FLOOR_DIV));
+    expect(1 - worst / atk).toBeLessThanOrEqual(1 - 1 / DAMAGE_FLOOR_DIV);
   });
 });
 

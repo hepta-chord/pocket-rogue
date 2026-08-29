@@ -1,7 +1,9 @@
+import { chooseStep, distanceField } from './ai';
 import {
   BOSS,
   MONSTERS,
   SLIME_CAP,
+  SPLIT_REWARD,
   STALKER,
   actorName,
   bountyFor,
@@ -56,6 +58,7 @@ import {
 } from './items';
 import {
   Tile,
+  canReach,
   canStep,
   deadEndRooms,
   generateMap,
@@ -105,14 +108,25 @@ const POISON_TURNS = 8;
 const POISON_MAX_TURNS = 12;
 
 /** フロア内でこのターン数ごとに 1 体湧く */
-const SPAWN_INTERVAL = 45;
+export const SPAWN_INTERVAL = 25;
 /** 湧いた個体の経験値とドロップ率の倍率。0 にはせず、倒す価値は残す */
 const SPAWN_REWARD = 0.5;
 // 1 階の滞在は普通に探索しても 100〜120 ターンほどなので、その倍を超えたあたりから圧をかける
 /** 追う者の予告が出るフロア内ターン数 */
-export const STALKER_WARN = 260;
+/**
+ * レベルの基準線の余裕。level が depth + GATE_SLACK を超えると取得経験値が減る。
+ *
+ * 減衰だけをかけ、増幅はしない。下回ったときに増やすと、階段直行で潜って
+ * 深い階で一気に回収する抜け道ができ、「階層を降りただけでは強くならない」と衝突する。
+ */
+export const GATE_SLACK = 6;
+
+/** 減衰で失った経験値がこの量たまるごとに、追う者の時計が 1 ターン進む */
+export const STALKER_PRESSURE_PER = 5;
+
+export const STALKER_WARN = 200;
 /** 追う者が現れるフロア内ターン数 */
-export const STALKER_TURN = 320;
+export const STALKER_TURN = 250;
 
 /** 魔法。コストはスタミナで払う */
 export type SpellKind = 'thunder';
@@ -143,7 +157,7 @@ export interface StepResult {
   interrupt: boolean;
 }
 
-export const SAVE_VERSION = 14;
+export const SAVE_VERSION = 15;
 
 /**
  * 次のレベルまでに必要な経験値。
@@ -157,6 +171,18 @@ export const SAVE_VERSION = 14;
  */
 export function xpToNext(level: number): number {
   return 6 + (level * (level + 1)) / 2;
+}
+
+/**
+ * 取得経験値の倍率。
+ *
+ * レベルが階数に対して進みすぎていると減る。1 を超えることはない。
+ * 基準線は depth + GATE_SLACK で、降りれば上がるので減衰が解ける。
+ * 「追われる前に降りろ」という既存の圧と同じ向きを指している。
+ */
+export function gateRate(level: number, depth: number): number {
+  const over = level - (depth + GATE_SLACK);
+  return over <= 0 ? 1 : 1 / (1 + over);
 }
 
 /** 階に到達したときのスコア */
@@ -191,6 +217,10 @@ export interface GameState {
   floorTurn: number;
   /** 追う者を呼んだか。1 階に 1 度だけ */
   stalkerCalled: boolean;
+  /** 予告を出したか。圧力で時計が飛んでも予告を飛ばさないために持つ */
+  stalkerWarned: boolean;
+  /** 頭打ちの状態で狩ったぶん、追う者の時計を進める量 */
+  stalkerPressure: number;
   /** 視界が狭い階 */
   dark: boolean;
   /** モンスターハウスのある部屋の添字。無ければ -1 */
@@ -223,8 +253,8 @@ export interface GameState {
   over: boolean;
 }
 
-const MAP_W = 40;
-const MAP_H = 30;
+const MAP_W = 32;
+const MAP_H = 24;
 const FOV_RADIUS = 7;
 /** 暗い階の視界。数マス先しか見えない */
 const DARK_FOV_RADIUS = 3;
@@ -281,6 +311,8 @@ export function newGame(seed: string): GameState {
     effects: {},
     floorTurn: 0,
     stalkerCalled: false,
+    stalkerWarned: false,
+    stalkerPressure: 0,
     dark: false,
     houseRoom: -1,
     houseArmed: false,
@@ -326,7 +358,9 @@ export function step(state: GameState, action: Action): StepResult {
   if (action.type === 'move') {
     const nx = p.x + action.dx;
     const ny = p.y + action.dy;
-    const target = monsterAt(state, nx, ny);
+    // 壁の角越しには攻撃も移動もできない。敵にも同じ制限をかけてある
+    const reaches = canReach(state.map, p.x, p.y, action.dx, action.dy);
+    const target = reaches ? monsterAt(state, nx, ny) : undefined;
     if (target) {
       playerAttack(state, rng, target);
     } else if (canStep(state.map, p.x, p.y, action.dx, action.dy)) {
@@ -544,6 +578,8 @@ function descend(state: GameState, rng: Rng): void {
   state.effects = {};
   state.floorTurn = 0;
   state.stalkerCalled = false;
+  state.stalkerWarned = false;
+  state.stalkerPressure = 0;
   placeHouse(state, rng);
   placeBoss(state, rng);
   state.visible = new Array<number>(MAP_W * MAP_H).fill(0);
@@ -1030,9 +1066,14 @@ function rollHit(rng: Rng, accuracy: number, evasion: number, sureHit: boolean):
 }
 
 /** プレイヤーに隣接している敵。群れ薙ぎで使う */
+/** プレイヤーに隣接していて、角越しではない敵。群れ薙ぎで使う */
 function adjacentMonsters(state: GameState): Actor[] {
   const p = state.player;
-  return state.monsters.filter((m) => Math.max(Math.abs(m.x - p.x), Math.abs(m.y - p.y)) === 1);
+  return state.monsters.filter(
+    (m) =>
+      Math.max(Math.abs(m.x - p.x), Math.abs(m.y - p.y)) === 1 &&
+      canReach(state.map, p.x, p.y, m.x - p.x, m.y - p.y),
+  );
 }
 
 function killMonster(state: GameState, rng: Rng, m: Actor): void {
@@ -1064,6 +1105,8 @@ function defeatBoss(state: GameState, m: Actor): void {
  * 戦うか避けるかの判断に装備の期待値が乗る。
  */
 function dropEquip(state: GameState, rng: Rng, m: Actor): void {
+  // 分裂体は落とさない。割るたびに抽選が増えると、分裂を止める装備が分裂で稼げてしまう
+  if (m.split) return;
   const family = MONSTERS[m.kind as MonsterKind].family;
   if (!rng.chance(DROP_CHANCE * (m.spawned ? SPAWN_REWARD : 1))) return;
   if (state.items.some((it) => it.x === m.x && it.y === m.y)) return;
@@ -1076,14 +1119,29 @@ function dropEquip(state: GameState, rng: Rng, m: Actor): void {
 
 /**
  * 撃破数・スコア・経験値をまとめて加算する。雷で倒したときもここを通す。
+ *
  * 後から湧いた個体は報酬を半分にする。居座って稼ぐ動機を弱めるためで、0 にはしない。
+ * 分裂体はさらに下げる。分裂は総 HP を増やさないので、労力が同じまま撃破数だけ増えるためである。
  */
 function rewardKill(state: GameState, m: Actor): void {
   state.kills++;
   const def = MONSTERS[m.kind as MonsterKind];
-  const rate = m.spawned ? SPAWN_REWARD : 1;
+  const rate = (m.spawned ? SPAWN_REWARD : 1) * (m.split ? SPLIT_REWARD : 1);
   state.score += Math.ceil(bountyFor(def, state.depth) * rate);
-  gainXp(state, Math.ceil(xpFor(def, state.depth) * rate));
+
+  const full = Math.ceil(xpFor(def, state.depth) * rate);
+  const gate = gateRate(state.level, state.depth);
+  const got = Math.ceil(full * gate);
+  const lost = full - got;
+
+  // 減衰したぶんはスコアに回す。基準線に張り付いても倒す動機が残るようにする。
+  // 同時に追う者の時計を進める。頭打ちの状態で狩り続けることにコストを付ける
+  if (lost > 0) {
+    state.score += lost;
+    state.stalkerPressure += Math.floor(lost / STALKER_PRESSURE_PER);
+    pushLog(state, 'info', `経験値 ${got} (深さに対してレベルが高いため ${full} から減った)。`);
+  }
+  gainXp(state, got);
 }
 
 /**
@@ -1153,8 +1211,10 @@ function thornsCounter(state: GameState, rng: Rng, m: Actor): void {
 
 /** 分裂: 隣の空きマスに HP 半分の個体を置く。上限あり */
 function trySplit(state: GameState, rng: Rng, m: Actor): void {
-  const slimes = state.monsters.filter((x) => x.kind === 'slime').length;
-  if (slimes >= SLIME_CAP) return;
+  // 同じ種類で数える。kind を固定すると、グレード 2 以降 (slimeSplit, slimeMimic) で
+  // 数が常に 0 になり、上限が一度も働かない
+  const kin = state.monsters.filter((x) => x.kind === m.kind).length;
+  if (kin >= SLIME_CAP) return;
   const half = Math.floor(m.hp / 2);
   if (half < 1) return;
   const spot = freeNeighbor(state, m.x, m.y, rng, false);
@@ -1170,6 +1230,7 @@ function trySplit(state: GameState, rng: Rng, m: Actor): void {
     atk: m.atk,
     def: m.def,
     evasion: m.evasion,
+    split: true,
   };
   state.monsters.push(child);
   pushLog(state, 'enemy', `${actorName(m.kind)}が分裂した。`);
@@ -1180,6 +1241,8 @@ function trySplit(state: GameState, rng: Rng, m: Actor): void {
 
 function monstersAct(state: GameState, rng: Rng): void {
   const p = state.player;
+  // 距離場はこの呼び出しの間だけ使う。プレイヤーは動かないので作り直さなくてよい
+  const field = distanceField(state.map, p);
   for (const m of [...state.monsters]) {
     if (p.hp <= 0) return;
     if (!state.monsters.includes(m)) continue;
@@ -1192,14 +1255,14 @@ function monstersAct(state: GameState, rng: Rng): void {
     const actions = def.passives.includes('fast') ? 2 : 1;
     for (let i = 0; i < actions; i++) {
       // 攻撃や技を使ったらこのターンは終わり (俊敏でも攻撃は 1 回)
-      if (monsterTurn(state, rng, m, def)) break;
+      if (monsterTurn(state, rng, m, def, field)) break;
       if (p.hp <= 0) break;
     }
   }
 }
 
 /** 1 回分の行動。攻撃か技を使ったら true、移動だけなら false */
-function monsterTurn(state: GameState, rng: Rng, m: Actor, def: MonsterDef): boolean {
+function monsterTurn(state: GameState, rng: Rng, m: Actor, def: MonsterDef, field: Int32Array): boolean {
   const p = state.player;
   const dx = p.x - m.x;
   const dy = p.y - m.y;
@@ -1208,7 +1271,7 @@ function monsterTurn(state: GameState, rng: Rng, m: Actor, def: MonsterDef): boo
 
   // 擬態: 武器のふりをして動かない。隣に来られた時点で正体を現し、その場で殴る
   if (isDisguised(m)) {
-    if (dist > 1) return true;
+    if (!canHitPlayer(state, m)) return true;
     reveal(state, m);
     monsterAttack(state, rng, m);
     return true;
@@ -1218,20 +1281,27 @@ function monsterTurn(state: GameState, rng: Rng, m: Actor, def: MonsterDef): boo
     return true;
   }
 
-  if (dist === 1) {
+  if (canHitPlayer(state, m)) {
     monsterAttack(state, rng, m);
     return true;
   }
 
   if (sees) {
-    // プレイヤーから見えている = 向こうからも見えているとみなして追ってくる
-    let sx = Math.sign(dx);
-    let sy = Math.sign(dy);
-    if (def.passives.includes('erratic') && rng.chance(0.5)) {
-      sx = rng.int(-1, 1);
-      sy = rng.int(-1, 1);
+    // プレイヤーから見えている = 向こうからも見えているとみなして追ってくる。
+    // 壁抜けは距離場の外を通れるので、素朴な寄せ方のままにする
+    if (def.passives.includes('phasing')) {
+      moveToward(state, m, Math.sign(dx), Math.sign(dy));
+    } else {
+      const spot = chooseStep(
+        { map: state.map, player: p, field, occupied: (x, y) => occupied(state, x, y), rng },
+        m,
+        def.passives.includes('erratic'),
+      );
+      if (spot) {
+        m.x = spot.x;
+        m.y = spot.y;
+      }
     }
-    moveToward(state, m, sx, sy);
   } else if (rng.chance(0.25)) {
     moveToward(state, m, rng.int(-1, 1), rng.int(-1, 1));
   }
@@ -1244,14 +1314,14 @@ function tryAction(state: GameState, rng: Rng, m: Actor, kind: ActionKind, dist:
   const name = actorName(m.kind);
   switch (kind) {
     case 'doubleAttack':
-      if (dist !== 1) return false;
+      if (!canHitPlayer(state, m)) return false;
       pushLog(state, 'enemy', `${name}が続けて切りつけた。`);
       monsterAttack(state, rng, m);
       if (p.hp > 0) monsterAttack(state, rng, m);
       return true;
 
     case 'smash':
-      if (dist !== 1) return false;
+      if (!canHitPlayer(state, m)) return false;
       monsterAttack(state, rng, m, { pierce: true, label: `${name}の強打!` });
       return true;
 
@@ -1267,7 +1337,7 @@ function tryAction(state: GameState, rng: Rng, m: Actor, kind: ActionKind, dist:
     }
 
     case 'poison': {
-      if (dist !== 1) return false;
+      if (!canHitPlayer(state, m)) return false;
       monsterAttack(state, rng, m, { label: `${name}の毒牙!` });
       if (p.hp <= 0) return true;
       state.effects.poison = Math.min(POISON_MAX_TURNS, (state.effects.poison ?? 0) + POISON_TURNS);
@@ -1276,7 +1346,7 @@ function tryAction(state: GameState, rng: Rng, m: Actor, kind: ActionKind, dist:
     }
 
     case 'corrodeHit': {
-      if (dist !== 1) return false;
+      if (!canHitPlayer(state, m)) return false;
       monsterAttack(state, rng, m, { label: `${name}が噛みついた!` });
       if (p.hp <= 0) return true;
       corrode(state);
@@ -1294,6 +1364,22 @@ function tryAction(state: GameState, rng: Rng, m: Actor, kind: ActionKind, dist:
       return true;
     }
   }
+}
+
+/**
+ * 敵からプレイヤーへ攻撃が届くか。
+ *
+ * 隣接していても、壁の角越しには届かない。
+ * 例外は 2 つある。壁抜けは壁の中を通れる相手なので角の制限が意味を持たず、
+ * reach は角越しを能力として持たせた敵である。
+ */
+function canHitPlayer(state: GameState, m: Actor): boolean {
+  const p = state.player;
+  const dx = p.x - m.x;
+  const dy = p.y - m.y;
+  if (Math.max(Math.abs(dx), Math.abs(dy)) !== 1) return false;
+  if (hasPassive(m.kind, 'reach') || hasPassive(m.kind, 'phasing')) return true;
+  return canReach(state.map, m.x, m.y, dx, dy);
 }
 
 function moveToward(state: GameState, m: Actor, sx: number, sy: number): void {
@@ -1395,13 +1481,18 @@ function tickFloorPressure(state: GameState, rng: Rng): void {
 
   if (state.stalkerCalled) return;
 
-  if (state.floorTurn === STALKER_WARN) {
-    // 階段の位置を把握できていない段階で出ると詰むので、方角だけ添えて予告する
+  // 頭打ちの状態で狩ったぶん、時計が進む
+  const clock = state.floorTurn + state.stalkerPressure;
+
+  if (!state.stalkerWarned && clock >= STALKER_WARN) {
+    // 階段の位置を把握できていない段階で出ると詰むので、方角だけ添えて予告する。
+    // 圧力で時計が飛んでも、予告だけは必ず 1 回出す
+    state.stalkerWarned = true;
     pushLog(state, 'alert', `地響きが近づいてくる。階段は${stairsDirection(state)}にある。`);
     return;
   }
 
-  if (state.floorTurn >= STALKER_TURN) {
+  if (clock >= STALKER_TURN) {
     const m = placeMonster(rng, state.map, STALKER, state.depth, state.monsters, () => state.nextId++, (x, y) =>
       outOfSight(state, x, y),
     );

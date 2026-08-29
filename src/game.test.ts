@@ -3,6 +3,7 @@ import { createMonster } from './entity';
 import type { FloorEffect } from './floors';
 import {
   SPELLS,
+  SPAWN_INTERVAL,
   applyFloorEffect,
   canCast,
   STALKER_TURN,
@@ -641,7 +642,8 @@ describe('長居への対策', () => {
   it('湧いた個体は見えない位置に出る', () => {
     const s = newGame('PR3');
     s.monsters = [];
-    for (let i = 0; i < 45; i++) {
+    // 湧いた直後に見る。放っておくと寄ってきて視界に入るのは正しい挙動である
+    for (let i = 0; i < SPAWN_INTERVAL; i++) {
       s.stamina = s.staminaMax;
       step(s, WAIT);
     }
@@ -672,8 +674,9 @@ describe('長居への対策', () => {
   });
 
   it('予告が出るのは、普通の探索より十分あとである', () => {
-    // 1 階の滞在は 100〜120 ターンほどなので、その倍を超えるあたりに置いてある
-    expect(STALKER_WARN).toBeGreaterThan(240);
+    // 盤面の縮小、迷路の輪づくり、敵の予算削減で 1 階の滞在は 60〜110 ターンになった。
+    // 長居の判定はそれに合わせてあり、深い階の滞在のおよそ 1.8 倍で予告が出る
+    expect(STALKER_WARN).toBeGreaterThan(180);
     expect(STALKER_TURN).toBeGreaterThan(STALKER_WARN);
   });
 
