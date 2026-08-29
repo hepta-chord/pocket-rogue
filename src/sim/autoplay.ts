@@ -6,7 +6,7 @@
 //
 // GameState と step() が DOM を触らないので、そのまま Node で回せる。
 
-import { BOSS } from '../entity';
+import { BOSS, type Actor } from '../entity';
 import {
   canCast,
   isBossFloor,
@@ -29,7 +29,8 @@ import {
 } from '../equip';
 import type { FloorKind } from '../floors';
 import { isEquip, stackLimit, type ConsumableKind, type Item } from '../items';
-import { canStep, idx, isWalkable, Tile } from '../map';
+import { isChoke } from '../ai';
+import { canReach, canStep, idx, isWalkable, Tile } from '../map';
 
 export interface Policy {
   /** HP がこの割合を下回ったら回復薬を飲む */
@@ -42,6 +43,12 @@ export interface Policy {
   itemRange: number;
   /** HP がこの割合を下回ったら青い床を取りにいく */
   healFloorAt: number;
+  /** この数以上の敵が見えたら隘路へ下がる。0 で無効 */
+  chokeAt: number;
+  /** 隘路を探す範囲 (歩数) */
+  chokeRange: number;
+  /** 隘路で敵を待つ上限ターン。超えたら通常行動に戻る */
+  chokeWait: number;
 }
 
 export const DEFAULT_POLICY: Policy = {
@@ -50,7 +57,16 @@ export const DEFAULT_POLICY: Policy = {
   elixirAt: 0.25,
   itemRange: 14,
   healFloorAt: 0.6,
+  chokeAt: 2,
+  chokeRange: 8,
+  chokeWait: 6,
 };
+
+/** run のあいだだけ持つ一時状態。GameState には持たせない */
+interface Memo {
+  /** 隘路で待った連続ターン数 */
+  waited: number;
+}
 
 export interface RunLimits {
   /** 1 つの run で進める上限 */
@@ -137,6 +153,7 @@ export function runOne(
   let lastKills = state.kills;
   let lastLevel = state.level;
   let lastTurn = state.turn;
+  const memo: Memo = { waited: 0 };
 
   try {
     while (!state.over && state.turn < limits.maxTurns) {
@@ -149,7 +166,7 @@ export function runOne(
       if (state.turn - floorStart > limits.maxTurnsPerFloor) break;
 
       const here = state.depth;
-      const action = decide(state, policy);
+      const action = decide(state, policy, memo);
       const result = step(state, action);
       // 選んだ手が通らなかった (敵に塞がれた等) ときは、詰まらないように 1 マス適当に動く
       if (!result.acted && !state.prompt) step(state, randomStep(state));
@@ -206,7 +223,7 @@ export function seedList(count: number, prefix = 'SIM'): string[] {
 // ---------------------------------------------------------------------------
 // 方針
 
-function decide(state: GameState, policy: Policy): Action {
+function decide(state: GameState, policy: Policy, memo: Memo): Action {
   // 確認が出ていたら、まずそれに答える
   if (state.prompt) {
     if (state.prompt.kind === 'equip') {
@@ -232,8 +249,36 @@ function decide(state: GameState, policy: Policy): Action {
     return { type: 'cast', spell: 'thunder' };
   }
 
-  const adjacent = seen.find((m) => Math.max(Math.abs(m.x - p.x), Math.abs(m.y - p.y)) === 1);
-  if (adjacent) return { type: 'move', dx: Math.sign(adjacent.x - p.x), dy: Math.sign(adjacent.y - p.y) };
+  // 角越しには殴れないので、届く敵だけを隣接とみなす
+  const adjacent = seen.find(
+    (m) =>
+      Math.max(Math.abs(m.x - p.x), Math.abs(m.y - p.y)) === 1 &&
+      canReach(state.map, p.x, p.y, m.x - p.x, m.y - p.y),
+  );
+
+  // 数で不利なら通路に下がり、1 対 1 を作って迎え撃つ。
+  // 通路の入口では角越しに殴られないので、正面の 1 体としか戦わずに済む
+  if (policy.chokeAt > 0 && seen.length >= policy.chokeAt && memo.waited <= policy.chokeWait) {
+    if (isChoke(state.map, p.x, p.y) && !onStairs(state, p.x, p.y)) {
+      if (adjacent) {
+        memo.waited = 0;
+        return { type: 'move', dx: Math.sign(adjacent.x - p.x), dy: Math.sign(adjacent.y - p.y) };
+      }
+      // 敵が来るのを待つ。来ないまま待ち続けるとスタミナだけが減るので上限を置く
+      memo.waited++;
+      return { type: 'wait' };
+    }
+    if (!adjacent) {
+      const back = stepTowardChoke(state, seen, policy.chokeRange);
+      if (back) return back;
+    }
+  }
+
+  if (adjacent) {
+    memo.waited = 0;
+    return { type: 'move', dx: Math.sign(adjacent.x - p.x), dy: Math.sign(adjacent.y - p.y) };
+  }
+  memo.waited = 0;
 
   // 傷ついていたら、立て直しの拠点である青い床を先に取りにいく
   if (ratio <= policy.healFloorAt) {
@@ -251,6 +296,67 @@ function decide(state: GameState, policy: Policy): Action {
   if (frontier) return frontier;
 
   return randomStep(state);
+}
+
+/**
+ * 階段のマスか。
+ *
+ * 階段の上で待つと降りる確認が出る (step の asks が wait を含む)。
+ * 隘路の候補から外さないと、答える → また待つ → また確認、の往復に入る。
+ */
+function onStairs(state: GameState, x: number, y: number): boolean {
+  const t = state.map.tiles[idx(state.map, x, y)];
+  return t === Tile.StairsDown || t === Tile.StairsUp;
+}
+
+/**
+ * 敵から遠い隘路へ下がる 1 歩。
+ * 遠い隘路へ向かうと道中で一方的に殴られるので、range 歩以内に絞る。
+ */
+function stepTowardChoke(state: GameState, seen: Actor[], range: number): Action | null {
+  const { map } = state;
+  const p = state.player;
+
+  // 敵全員からの距離場
+  const away = new Int32Array(map.width * map.height).fill(-1);
+  const queue: number[] = [];
+  for (const m of seen) {
+    const i = idx(map, m.x, m.y);
+    if (away[i] !== -1) continue;
+    away[i] = 0;
+    queue.push(i);
+  }
+  for (let head = 0; head < queue.length; head++) {
+    const i = queue[head];
+    const cx = i % map.width;
+    const cy = Math.floor(i / map.width);
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        if (dx === 0 && dy === 0) continue;
+        if (!canStep(map, cx, cy, dx, dy)) continue;
+        const ni = idx(map, cx + dx, cy + dy);
+        if (away[ni] !== -1) continue;
+        away[ni] = away[i] + 1;
+        queue.push(ni);
+      }
+    }
+  }
+
+  const here = away[idx(map, p.x, p.y)];
+  let best: { x: number; y: number; d: number } | null = null;
+  for (let y = 1; y < map.height - 1; y++) {
+    for (let x = 1; x < map.width - 1; x++) {
+      const i = idx(map, x, y);
+      if (state.explored[i] !== 1 || !isWalkable(map, x, y)) continue;
+      if (!isChoke(map, x, y) || onStairs(state, x, y)) continue;
+      const d = away[i];
+      // 今いる場所より敵から遠いところにしか下がらない
+      if (d < 0 || d <= here) continue;
+      if (!best || d > best.d) best = { x, y, d };
+    }
+  }
+  if (!best) return null;
+  return bfsStep(state, [{ x: best.x, y: best.y }], range);
 }
 
 function nearestItemStep(state: GameState, range: number): Action | null {
