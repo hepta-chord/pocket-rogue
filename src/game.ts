@@ -108,14 +108,14 @@ const POISON_TURNS = 8;
 const POISON_MAX_TURNS = 12;
 
 /** フロア内でこのターン数ごとに 1 体湧く */
-const SPAWN_INTERVAL = 45;
+export const SPAWN_INTERVAL = 25;
 /** 湧いた個体の経験値とドロップ率の倍率。0 にはせず、倒す価値は残す */
 const SPAWN_REWARD = 0.5;
 // 1 階の滞在は普通に探索しても 100〜120 ターンほどなので、その倍を超えたあたりから圧をかける
 /** 追う者の予告が出るフロア内ターン数 */
-export const STALKER_WARN = 260;
+export const STALKER_WARN = 200;
 /** 追う者が現れるフロア内ターン数 */
-export const STALKER_TURN = 320;
+export const STALKER_TURN = 250;
 
 /** 魔法。コストはスタミナで払う */
 export type SpellKind = 'thunder';
@@ -226,8 +226,8 @@ export interface GameState {
   over: boolean;
 }
 
-const MAP_W = 40;
-const MAP_H = 30;
+const MAP_W = 32;
+const MAP_H = 24;
 const FOV_RADIUS = 7;
 /** 暗い階の視界。数マス先しか見えない */
 const DARK_FOV_RADIUS = 3;

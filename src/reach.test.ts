@@ -47,6 +47,8 @@ function corner(seed: string, monsterKind: Parameters<typeof createMonster>[0], 
   state.visible = new Array<number>(W * H).fill(1);
   state.explored = new Array<number>(W * H).fill(1);
   state.prompt = null;
+  // 命中判定の運で結果が揺れないように、必中の武器を持たせる
+  state.weapon = { id: 'swiftSpear', power: 1 };
   return state;
 }
 

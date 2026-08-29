@@ -277,8 +277,12 @@ export function createMonster(kind: MonsterKind, depth: number, x: number, y: nu
 }
 
 /**
- * 階ごとの配置。人数の予算 (3 + 階 + 0〜2) を、出現条件を満たす敵から重みで選んで埋める。
+ * 階ごとの配置。人数の予算を、出現条件を満たす敵から重みで選んで埋める。
  * 群れは 1 回の抽選でまとめて置き、上限のある敵は数える。
+ *
+ * 予算は階の半分で伸ばす。1 階の滞在ターンを短くするための削減であり、
+ * 掃討にかかる手数がそのまま滞在時間になっていた。
+ * 群れの pack は削らない。数で押す系統なので、頭数を削ると包囲が成立しなくなる。
  */
 export function spawnMonsters(
   rng: Rng,
@@ -287,7 +291,7 @@ export function spawnMonsters(
   avoid: { x: number; y: number },
   nextId: () => number,
 ): Actor[] {
-  const budget = 3 + depth + rng.int(0, 2);
+  const budget = 3 + Math.floor(depth / 2) + rng.int(0, 1);
   const monsters: Actor[] = [];
   const counts: Partial<Record<MonsterKind, number>> = {};
 
