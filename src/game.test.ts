@@ -18,7 +18,7 @@ import {
   type Action,
   type GameState,
 } from './game';
-import { stackLimit, type Item } from './items';
+import { CONSUMABLES, stackLimit, type Item } from './items';
 import { Tile, isWalkable, tileAt } from './map';
 
 function play(seed: string, actions: Action[]): GameState {
@@ -472,11 +472,14 @@ describe('魔法', () => {
   it('スロットに消耗品と魔法が並ぶ', () => {
     const s = newGame('SP4');
     const vm = toViewModel(s);
-    expect(vm.slots.map((x) => x.ref.kind)).toEqual(['item', 'item', 'spell']);
+    const kinds = vm.slots.map((x) => x.ref.kind);
+    // 消耗品が先に並び、そのあとに魔法が来る
+    expect(kinds.filter((k) => k === 'item').length).toBe(CONSUMABLES.length);
+    expect(kinds.slice(CONSUMABLES.length).every((k) => k === 'spell')).toBe(true);
     // 持っていない消耗品は押せない
     expect(vm.slots[0].enabled).toBe(false);
     // スタミナが満タンなら魔法は押せる
-    expect(vm.slots[2].enabled).toBe(true);
+    expect(vm.slots[CONSUMABLES.length].enabled).toBe(true);
   });
 });
 

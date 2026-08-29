@@ -17,13 +17,13 @@ import type { Rng } from './rng';
 
 // 消耗品は 2 種だけにする。
 // 雷は魔法 (スタミナ消費) に、地図は床のイベント効果に移した。
-export type ConsumableKind = 'potion' | 'elixir';
+export type ConsumableKind = 'potion' | 'elixir' | 'map';
 export type EquipKind = EquipSlot;
 /** 拾うとスコアになるだけの品。ボスが落とす */
 export type TreasureKind = 'treasure';
 export type ItemKind = ConsumableKind | EquipKind | TreasureKind;
 
-export const CONSUMABLES: readonly ConsumableKind[] = ['potion', 'elixir'];
+export const CONSUMABLES: readonly ConsumableKind[] = ['potion', 'elixir', 'map'];
 
 export interface Item {
   kind: ItemKind;
@@ -47,6 +47,7 @@ export type Inventory = Record<ConsumableKind, number>;
 export const ITEM_NAMES: Record<ItemKind, string> = {
   potion: 'HP 回復薬',
   elixir: 'スタミナ薬',
+  map: '地図',
   weapon: '武器',
   armor: '防具',
   treasure: '財宝',
@@ -58,7 +59,7 @@ export const ITEM_NAMES: Record<ItemKind, string> = {
  * スタミナ薬を無制限に持ち歩けるとスタミナ切れのペナルティが無効になり、
  * 居座って稼ぐのが最適解に戻る。
  */
-export const STACK_LIMITS: Record<ConsumableKind, number> = { potion: 5, elixir: 3 };
+export const STACK_LIMITS: Record<ConsumableKind, number> = { potion: 5, elixir: 3, map: 2 };
 
 export function stackLimit(kind: ConsumableKind): number {
   return STACK_LIMITS[kind];
@@ -68,7 +69,7 @@ export function stackLimit(kind: ConsumableKind): number {
 // 武器の重みを上げて、1 個あたりの重みを下げる。
 // 回復薬は 1 個あたりの量を下げたぶん、出る数を増やしてある。
 // 財宝は床には出ない。ボスを倒したときだけ落ちる
-const WEIGHTS: Record<ItemKind, number> = { potion: 6, elixir: 4, weapon: 4, armor: 3, treasure: 0 };
+const WEIGHTS: Record<ItemKind, number> = { potion: 6, elixir: 4, map: 3, weapon: 4, armor: 3, treasure: 0 };
 const KINDS = (Object.keys(WEIGHTS) as ItemKind[]).filter((k) => WEIGHTS[k] > 0);
 
 /** 敵を倒したときに装備を落とす確率 */
@@ -81,7 +82,7 @@ const KINDS = (Object.keys(WEIGHTS) as ItemKind[]).filter((k) => WEIGHTS[k] > 0)
 export const DROP_CHANCE = 0.2;
 
 export function emptyInventory(): Inventory {
-  return { potion: 0, elixir: 0 };
+  return { potion: 0, elixir: 0, map: 0 };
 }
 
 export function isEquip(kind: ItemKind): kind is EquipKind {

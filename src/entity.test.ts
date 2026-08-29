@@ -33,8 +33,9 @@ describe('MONSTERS', () => {
     expect(byFamily.boss).toEqual(['dragon', 'stalker']);
   });
 
-  it('系統ごとに帯がずれ、グレードのあいだに空白期間がある', () => {
-    const families = ['swarm', 'swift', 'warrior', 'odd', 'heavy'] as const;
+  it('巡回する系統は、グレードのあいだに空白期間がある', () => {
+    // 変則は全階に出る特殊枠なので、この巡回には入らない
+    const families = ['swarm', 'swift', 'warrior', 'heavy'] as const;
     for (const f of families) {
       const byGrade = KINDS.filter((k) => MONSTERS[k].family === f).sort(
         (a, b) => MONSTERS[a].grade - MONSTERS[b].grade,
@@ -48,17 +49,46 @@ describe('MONSTERS', () => {
     }
   });
 
-  it('どの階も 2〜4 系統に絞られ、5 系統は揃わない', () => {
-    for (let depth = 1; depth <= 32; depth++) {
-      const here = new Set(
-        KINDS.filter((k) => {
-          const d = MONSTERS[k];
-          return d.weight > 0 && d.minDepth <= depth && depth <= d.maxDepth;
-        }).map((k) => MONSTERS[k].family),
-      );
+  const familiesAt = (depth: number): Set<string> =>
+    new Set(
+      KINDS.filter((k) => {
+        const d = MONSTERS[k];
+        return d.weight > 0 && d.minDepth <= depth && depth <= d.maxDepth;
+      }).map((k) => MONSTERS[k].family),
+    );
+
+  it('どの階も系統が絞られ、全部が揃うのは最深部だけ', () => {
+    for (let depth = 1; depth <= 30; depth++) {
+      const here = familiesAt(depth);
       expect(here.size).toBeGreaterThanOrEqual(2);
-      expect(here.size).toBeLessThanOrEqual(4);
+      // 5 系統が揃うのは、グレード 3 が出そろう深さから
+      if (depth < 25) expect(here.size).toBeLessThanOrEqual(4);
     }
+  });
+
+  it('変則はどの階にも 1 種類だけ出る', () => {
+    for (let depth = 1; depth <= 40; depth++) {
+      const odd = KINDS.filter((k) => {
+        const d = MONSTERS[k];
+        return d.family === 'odd' && d.minDepth <= depth && depth <= d.maxDepth;
+      });
+      expect(odd).toHaveLength(1);
+    }
+  });
+
+  it('12 種の巡回する敵が 30F までにすべて出る', () => {
+    const seen = new Set<string>();
+    for (let depth = 1; depth <= 30; depth++) {
+      for (const k of KINDS) {
+        const d = MONSTERS[k];
+        if (d.weight > 0 && d.minDepth <= depth && depth <= d.maxDepth) seen.add(k);
+      }
+    }
+    const rotating = KINDS.filter((k) => {
+      const f = MONSTERS[k].family;
+      return f !== 'boss' && f !== 'odd';
+    });
+    for (const k of rotating) expect(seen.has(k)).toBe(true);
   });
 
   it('どの階にも人数の上限が無い系統が 1 つはある', () => {
