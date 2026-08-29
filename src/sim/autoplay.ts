@@ -6,7 +6,7 @@
 //
 // GameState と step() が DOM を触らないので、そのまま Node で回せる。
 
-import { BOSS, STALKER, type Actor } from '../entity';
+import { BOSS, STALKER, familyOf, type Actor } from '../entity';
 import {
   canCast,
   isBossFloor,
@@ -264,6 +264,21 @@ function decide(state: GameState, policy: Policy, memo: Memo): Action {
       canReach(state.map, p.x, p.y, m.x - p.x, m.y - p.y),
   );
 
+  // 遠隔の敵は通路に下がっても射線が通る。待つあいだ一方的に撃たれるので、
+  // 下がる判断より先に間合いを潰しにいく。
+  // この判断を持たせないと、隘路で待って撃たれ続ける形になり、
+  // 遠隔を「通路戦術への対抗手段」として測れなくなる
+  if (!adjacent) {
+    const shooter = nearestTo(p, seen.filter((m) => familyOf(m.kind) === 'ranged'));
+    if (shooter) {
+      const close = stepTowardMonster(state, shooter);
+      if (close) {
+        memo.waited = 0;
+        return close;
+      }
+    }
+  }
+
   // 数で不利なら通路に下がり、1 対 1 を作って迎え撃つ。
   // 通路の入口では角越しに殴られないので、正面の 1 体としか戦わずに済む
   if (policy.chokeAt > 0 && seen.length >= policy.chokeAt && memo.waited <= policy.chokeWait) {
@@ -365,6 +380,33 @@ function stepTowardChoke(state: GameState, seen: Actor[], range: number): Action
   }
   if (!best) return null;
   return bfsStep(state, [{ x: best.x, y: best.y }], range);
+}
+
+/** 一番近い 1 体。いなければ null */
+function nearestTo(from: { x: number; y: number }, list: Actor[]): Actor | null {
+  let best: Actor | null = null;
+  let bestD = Infinity;
+  for (const m of list) {
+    const d = Math.max(Math.abs(m.x - from.x), Math.abs(m.y - from.y));
+    if (d < bestD) {
+      bestD = d;
+      best = m;
+    }
+  }
+  return best;
+}
+
+/** その敵の隣まで詰める 1 歩。敵のいるマスは通れないので、隣接マスを目的地にする */
+function stepTowardMonster(state: GameState, m: Actor): Action | null {
+  const spots: { x: number; y: number }[] = [];
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      if (dx === 0 && dy === 0) continue;
+      if (!isWalkable(state.map, m.x + dx, m.y + dy)) continue;
+      spots.push({ x: m.x + dx, y: m.y + dy });
+    }
+  }
+  return spots.length > 0 ? bfsStep(state, spots, Infinity) : null;
 }
 
 function nearestItemStep(state: GameState, range: number): Action | null {

@@ -43,6 +43,10 @@ export const ACTOR_GLYPHS: Record<ActorKind, Glyph> = {
   slimeSplit: { ch: 's', fg: '#c8c8ff' },
   slimeMimic: { ch: 's', fg: '#ff9bd8' },
 
+  koboldSpear: { ch: 'k', fg: '#d8b25a' },
+  koboldBow: { ch: 'k', fg: '#7fd8c0' },
+  koboldSniper: { ch: 'k', fg: '#ff7fa8' },
+
   troll: { ch: 'T', fg: '#5aa9e6' },
   trollRock: { ch: 'T', fg: '#b0a08a' },
   trollIron: { ch: 'T', fg: '#d0d0d8' },
